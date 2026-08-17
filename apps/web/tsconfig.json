@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "verbatimModuleSyntax": true,
+
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true,
+
+    // "node" esta por las pruebas, no por la app: sw.test.ts lee public/sw.js
+    // del disco para probar el archivo que de verdad se despliega, en vez de
+    // una copia de sus reglas. La app en si no usa nada de Node; si algun dia
+    // se cuela un `process.env` en el navegador, Vite lo deja en undefined.
+    "types": ["vite/client", "node"]
+  },
+  "include": ["src"]
+}

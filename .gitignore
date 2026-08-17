@@ -1,0 +1,53 @@
+node_modules/
+dist/
+build/
+coverage/
+
+# Variables de entorno: nunca se versionan
+.env
+.env.*
+!.env.example
+!deployment/.env.production
+
+# Base de datos local
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+npm-debug.log*
+*.log.*
+
+# WhatsApp session (IMPORTANTE: no subir credenciales)
+whatsapp-session/
+**/whatsapp-session/
+auth_info_baileys/
+baileys_store/
+*.session.json
+
+# Configuración de IA (contiene API keys)
+config-ia.json
+**/config-ia.json
+
+# Uploads y archivos temporales
+uploads/
+temp/
+tmp/
+
+# Backups
+backups/
+*.tar.gz
+*.zip
+
+# Sistema operativo / editores
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# PM2
+.pm2/
+ecosystem.config.js.backup

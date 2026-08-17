@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      viewport-fit=cover deja que la app use la pantalla completa en celulares
+      con notch; el padding seguro lo maneja el CSS.
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Control de dinero y nomina</title>
+
+    <meta name="description" content="Ventas, cobros, gastos, nomina y caja del negocio." />
+    <meta name="theme-color" content="#059669" />
+
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/favicon.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+    <!-- iOS no lee el manifest: necesita sus propias etiquetas para abrir
+         la app sin la barra de Safari. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Control" />
+
+    <!-- Datos de plata: que no queden en buscadores ni en el historial de
+         nadie mas que quien entra con su usuario. -->
+    <meta name="robots" content="noindex, nofollow" />
+  </head>
+  <body>
+    <div id="raiz"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

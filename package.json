@@ -1,0 +1,21 @@
+{
+  "name": "appcreditorres",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Control de dinero, nomina por ventas y catalogo de productos",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev --workspace @credito/api",
+    "dev:web": "npm run dev --workspace @credito/web",
+    "migrar": "npm run db:migrate --workspace @credito/api",
+    "build": "npm run build --workspace @credito/shared && npm run build --workspace @credito/api && npm run build --workspace @credito/web",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -1,0 +1,1 @@
+ALTER TABLE `configuracion` ADD `logo_url` text;
