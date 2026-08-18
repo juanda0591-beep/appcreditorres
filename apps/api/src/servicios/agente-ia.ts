@@ -1,9 +1,18 @@
 import OpenAI from 'openai';
 
-// Inicializar cliente de OpenAI
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// Inicializar cliente de OpenAI de forma lazy
+let openai: OpenAI | null = null;
+
+function getOpenAIClient(): OpenAI {
+  if (!openai) {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw new Error('OPENAI_API_KEY no está configurado en el .env');
+    }
+    openai = new OpenAI({ apiKey });
+  }
+  return openai;
+}
 
 interface Mensaje {
   role: 'system' | 'user' | 'assistant';
@@ -68,7 +77,8 @@ Reglas:
   ];
 
   try {
-    const respuesta = await openai.chat.completions.create({
+    const client = getOpenAIClient();
+    const respuesta = await client.chat.completions.create({
       model: 'gpt-4o-mini', // Más económico y rápido
       messages: mensajes,
       temperature: 0.7,
