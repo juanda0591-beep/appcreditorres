@@ -320,6 +320,7 @@ function FormularioUsuario({
 }: FormularioUsuarioProps) {
   const [usuarioNombre, setUsuarioNombre] = useState(usuario?.usuario || '');
   const [contrasena, setContrasena] = useState('');
+  const [cambiarContrasena, setCambiarContrasena] = useState(false);
   const [nombre, setNombre] = useState(usuario?.nombre || '');
   const [rol, setRol] = useState<Rol>(usuario?.rol || 'vendedor');
   const [activo, setActivo] = useState(usuario?.activo ?? true);
@@ -339,6 +340,8 @@ function FormularioUsuario({
     };
     if (!usuario) {
       datos.usuario = usuarioNombre;
+      datos.contrasena = contrasena;
+    } else if (cambiarContrasena && contrasena) {
       datos.contrasena = contrasena;
     }
     onGuardar(datos);
@@ -372,6 +375,33 @@ function FormularioUsuario({
                 required
                 minLength={6}
               />
+            </div>
+          )}
+
+          {usuario && (
+            <div className="campo">
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={cambiarContrasena}
+                  onChange={(e) => {
+                    setCambiarContrasena(e.target.checked);
+                    if (!e.target.checked) setContrasena('');
+                  }}
+                />
+                Cambiar contraseña
+              </label>
+              {cambiarContrasena && (
+                <input
+                  type="password"
+                  value={contrasena}
+                  onChange={(e) => setContrasena(e.target.value)}
+                  placeholder="Nueva contraseña"
+                  required
+                  minLength={6}
+                  style={{ marginTop: '8px' }}
+                />
+              )}
             </div>
           )}
 
