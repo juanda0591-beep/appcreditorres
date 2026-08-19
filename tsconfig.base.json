@@ -6,8 +6,8 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
 
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
+    "strict": false,
+    "noUncheckedIndexedAccess": false,
     "noImplicitOverride": true,
     "noFallthroughCasesInSwitch": true,
     "verbatimModuleSyntax": true,

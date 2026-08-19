@@ -11,6 +11,7 @@ interface ConfigIA {
   temperatura?: number;
   maxTokens?: number;
   promptSistema?: string;
+  apiKeyConfigured?: boolean;
 }
 
 interface LogMensaje {

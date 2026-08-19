@@ -1,0 +1,10 @@
+# Comandos para ejecutar en tu VPS (copia y pega uno por uno)
+
+# 1. Descargar el script de deployment
+wget https://raw.githubusercontent.com/juanda0591-beep/appcreditorres/main/deployment/deploy-rapido.sh
+
+# 2. Dar permisos de ejecución
+chmod +x deploy-rapido.sh
+
+# 3. Ejecutar el script (tomará 5-10 minutos)
+./deploy-rapido.sh
