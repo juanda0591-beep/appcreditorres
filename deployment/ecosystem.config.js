@@ -2,7 +2,7 @@ module.exports = {
   apps: [
     {
       name: 'appcreditorres',
-      script: 'apps/api/dist/index.js',
+      script: 'apps/api/dist/server.js',
       cwd: '/var/www/appcreditorres',
       instances: 1,
       exec_mode: 'fork',
