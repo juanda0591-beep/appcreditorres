@@ -171,7 +171,7 @@ setInterval(() => {
 }, 3600000);
 
 /**
- * Obtiene el catálogo de productos visible
+ * Obtiene el catálogo de productos visible (optimizado para reducir tokens)
  */
 async function obtenerCatalogo(): Promise<string> {
   try {
@@ -186,33 +186,87 @@ async function obtenerCatalogo(): Promise<string> {
       return 'No hay productos disponibles en este momento.';
     }
 
-    // Formatear productos para el contexto de la IA
+    // Formatear productos de forma compacta (reducir tokens)
     const listadoProductos = productosVisibles.map((p, index) => {
       const prod = aProducto(p);
       console.log(`Producto ${index + 1}: ${prod.nombre} - Contado: $${prod.precios.contado} - Crédito: $${prod.precios.credito}`);
 
-      return `${index + 1}. ${prod.nombre}
-   - Categoría: ${prod.categoria || 'Sin categoría'}
-   - Precio contado: $${prod.precios.contado.toLocaleString()}
-   - Precio credicontado: $${prod.precios.credicontado.toLocaleString()}
-   - Precio crédito: $${prod.precios.credito.toLocaleString()}
-   - Cuota inicial: $${prod.precios.inicial.toLocaleString()}
-   - Pago semanal: $${prod.precios.pagoSemanal.toLocaleString()}
-   - Pago quincenal: $${prod.precios.pagoQuincenal.toLocaleString()}
-   - Pago mensual: $${prod.precios.pagoMensual.toLocaleString()}
-   ${prod.descripcion ? `- Descripción: ${prod.descripcion}` : ''}
-   ${prod.disponible ? '✓ Disponible' : '✗ No disponible'}
-   ${prod.esNuevo ? '🆕 NUEVO' : ''}
-   ${prod.enPromocion ? '🔥 EN PROMOCIÓN' : ''}`;
-    }).join('\n\n');
+      // Formato ultra-compacto: solo info esencial
+      return `${index + 1}. ${prod.nombre} | ${prod.categoria || 'General'} | Contado: $${prod.precios.contado.toLocaleString()} | Crédito: $${prod.precios.credito.toLocaleString()} | Inicial: $${prod.precios.inicial.toLocaleString()} | Semanal: $${prod.precios.pagoSemanal.toLocaleString()}${prod.esNuevo ? ' 🆕' : ''}${prod.enPromocion ? ' 🔥' : ''}`;
+    }).join('\n');
 
-    const catalogoCompleto = `CATÁLOGO DE PRODUCTOS DISPONIBLES:\n\n${listadoProductos}`;
+    const catalogoCompleto = `PRODUCTOS:\n${listadoProductos}`;
     console.log('📋 Catálogo generado, caracteres:', catalogoCompleto.length);
 
     return catalogoCompleto;
   } catch (error) {
     console.error('Error al obtener catálogo:', error);
     return 'Error al cargar el catálogo de productos.';
+  }
+}
+
+/**
+ * Filtra productos relevantes según el mensaje del cliente (optimización de tokens)
+ */
+async function obtenerProductosRelevantes(mensaje: string): Promise<string> {
+  try {
+    const mensajeLower = mensaje.toLowerCase();
+
+    // Palabras clave comunes por categoría
+    const categorias: Record<string, string[]> = {
+      'cocina': ['nevera', 'estufa', 'cocina', 'refrigerador', 'horno', 'microondas'],
+      'sala': ['sofa', 'sofá', 'mueble', 'sala', 'poltron', 'sillon'],
+      'comedor': ['comedor', 'mesa', 'silla', 'sillas'],
+      'habitacion': ['cama', 'colchon', 'colchón', 'closet', 'nochero', 'habitacion', 'dormitorio'],
+      'lavanderia': ['lavadora', 'secadora', 'lavanderia'],
+      'electrodomestico': ['televisor', 'tv', 'ventilador', 'aire', 'licuadora', 'plancha']
+    };
+
+    // Detectar categoría mencionada
+    let categoriaDetectada = '';
+    for (const [categoria, palabras] of Object.entries(categorias)) {
+      if (palabras.some(palabra => mensajeLower.includes(palabra))) {
+        categoriaDetectada = categoria;
+        break;
+      }
+    }
+
+    const productosVisibles = await db
+      .select()
+      .from(productos)
+      .where(eq(productos.visible, true));
+
+    // Si detectamos categoría, filtrar; sino, enviar todos
+    let productosFiltrados = productosVisibles;
+    if (categoriaDetectada) {
+      productosFiltrados = productosVisibles.filter(p => {
+        const prod = aProducto(p);
+        const categoriaProducto = (prod.categoria || '').toLowerCase();
+        const nombreProducto = prod.nombre.toLowerCase();
+
+        // Buscar por categoría o por palabras clave en el nombre
+        return categoriaProducto.includes(categoriaDetectada) ||
+               categorias[categoriaDetectada]?.some(palabra => nombreProducto.includes(palabra));
+      });
+
+      console.log(`🎯 Productos filtrados por "${categoriaDetectada}": ${productosFiltrados.length}/${productosVisibles.length}`);
+    }
+
+    // Si el filtro dejó menos de 3 productos, enviar todos
+    if (productosFiltrados.length < 3) {
+      productosFiltrados = productosVisibles;
+    }
+
+    // Formatear de forma compacta
+    const listadoProductos = productosFiltrados.map((p, index) => {
+      const prod = aProducto(p);
+      return `${index + 1}. ${prod.nombre} | ${prod.categoria || 'General'} | Contado: $${prod.precios.contado.toLocaleString()} | Crédito: $${prod.precios.credito.toLocaleString()} | Inicial: $${prod.precios.inicial.toLocaleString()} | Semanal: $${prod.precios.pagoSemanal.toLocaleString()}${prod.esNuevo ? ' 🆕' : ''}${prod.enPromocion ? ' 🔥' : ''}`;
+    }).join('\n');
+
+    return `PRODUCTOS:\n${listadoProductos}`;
+  } catch (error) {
+    console.error('Error al filtrar productos:', error);
+    return await obtenerCatalogo(); // Fallback al catálogo completo
   }
 }
 
@@ -350,7 +404,8 @@ ${resumenConversacion}`;
 
     // Llamar a la IA (OpenAI)
     try {
-      const catalogo = await obtenerCatalogo();
+      // Usar catálogo filtrado para reducir tokens
+      const catalogo = await obtenerProductosRelevantes(mensaje);
 
       const respuesta = await consultarIA(mensaje, configIA, catalogo, historial);
 
@@ -542,64 +597,39 @@ async function consultarIA(
     saludoSegunHora = 'Buenas noches';
   }
 
-  const promptSistemaBase = config.promptSistema || `Eres María, una asesora de ventas amable y cercana de una tienda de artículos para el hogar. Hablas de manera natural como lo haría un vendedor colombiano real por WhatsApp.
+  const promptSistemaBase = config.promptSistema || `Eres María, asesora de ventas amable de una tienda de artículos para el hogar. Hablas natural como vendedor colombiano por WhatsApp.
 
-HORA ACTUAL EN COLOMBIA: ${saludoSegunHora} (usa este saludo cuando el cliente te escriba por primera vez o diga "hola")
+HORA: ${saludoSegunHora}
 
-PERSONALIDAD Y TONO:
-- Eres cálida, amigable y genuinamente servicial
-- Usas un lenguaje natural y coloquial (pero profesional)
-- Muestras entusiasmo real por ayudar al cliente
-- Eres empática con la situación económica del cliente
-- Haces preguntas para entender mejor lo que necesitan
-- Compartes detalles como si estuvieras conversando cara a cara
-- Usas expresiones naturales: "¡qué bueno!", "perfecto", "claro que sí", "con mucho gusto"
+ESTILO:
+- Cálida, amigable, empática
+- Lenguaje natural y coloquial
+- Haz preguntas para entender necesidades
+- Usa *negritas* para productos/precios
+- Emojis con moderación: 💰 contado | 💳 crédito | 📦 inicial | ⏰ pagos
+- Mensajes cortos (2-4 líneas)
 
-ESTILO DE CONVERSACIÓN:
-- Escribe como hablas en WhatsApp: natural, directo, sin ser robótico
-- Saluda según la hora: ${saludoSegunHora}
-- Haz preguntas de seguimiento: "¿para qué habitación lo necesitas?", "¿tienes un presupuesto en mente?"
-- Comparte tips o consejos: "este se vende mucho", "es el favorito de los clientes"
-- Reconoce lo que el cliente dice antes de responder
-- Si el cliente parece indeciso, ofrece alternativas o sugiere algo
+CONTEXTO:
+- Lee el historial completo
+- Si ya enviaste producto y cliente pregunta "cuánto", se refiere al último
+- NO repitas info ya dada
+- Mantén coherencia
 
-FORMATO WHATSAPP - USA PERO CON NATURALIDAD:
-- Usa *negritas* para productos y precios importantes
-- Emojis con moderación (no sobrecargues):
-  💰 contado | 💳 crédito | 📦 inicial | ⏰ pagos | ✨ promoción
-- Respuestas cortas (2-4 líneas), como mensajes reales de WhatsApp
-- Evita listas largas, mejor ofrece 2-3 opciones y pregunta
-
-CONTEXTO CONVERSACIONAL:
-- Lee TODO el historial antes de responder
-- Si ya enviaste productos con imagen y el cliente pregunta "cuánto cuesta", "me gusta", se refiere al ÚLTIMO producto
-- NO repitas información que ya diste
-- Mantén coherencia: si ya presentaste opciones, no las vuelvas a listar
-- Recuerda detalles mencionados por el cliente
-
-EJEMPLOS DE RESPUESTAS NATURALES:
-
+EJEMPLOS:
 Cliente: "Hola"
-Tú: "¡Hola! ¿Cómo estás? 😊 Soy María. ¿En qué te puedo ayudar hoy?"
+Tú: "¡Hola! ¿Cómo estás? 😊 Soy María. ¿En qué te ayudo?"
 
-Cliente: "Busco una nevera"
-Tú: "¡Perfecto! Tenemos varias opciones. ¿Buscas algo grande tipo familiar o algo más compacto? 🤔"
+Cliente: "Busco nevera"
+Tú: "¡Perfecto! ¿Buscas algo grande familiar o compacto? 🤔"
 
 Cliente: "Cuánto cuesta"
-Tú (si ya enviaste producto): "El *Comedor Moderno* que te mostré está así:
+Tú: "El *Comedor Moderno* está:
 💰 Contado: *$850.000*
 💳 Crédito: *$1.200.000*
-📦 Das inicial de *$400.000* y pagas ⏰*$30.000* semanales
+📦 Inicial *$400.000* y pagas ⏰*$30.000* semanales
 ¿Qué te parece? 😊"
 
-Cliente: "Es mucho"
-Tú: "Te entiendo perfectamente 😊 Mira, tenemos uno más económico que también está lindo. ¿Quieres que te lo muestre?"
-
-IMPORTANTE:
-- Suena como una persona real, no como un bot
-- Sé conversacional pero eficiente
-- Muestra interés genuino en ayudar
-- Adapta tu tono según la conversación`;
+Suena como persona real, no bot. Sé conversacional pero eficiente.`;
 
   // Obtener el último producto mencionado del historial
   let ultimoProductoMencionado = '';
@@ -617,12 +647,11 @@ IMPORTANTE:
 ${catalogo}
 ---
 
-Usa SOLO la información del catálogo anterior para responder sobre productos, precios y disponibilidad.
-RECUERDA: USA SIEMPRE formato WhatsApp con *negritas* y emojis en CADA respuesta. NO uses listas con guiones (-), usa emojis al inicio de cada línea.`;
+Usa SOLO la info del catálogo para responder sobre productos/precios. USA formato WhatsApp con *negritas* y emojis.`;
 
   // Si hay un último producto mencionado, agregarlo al contexto
   if (ultimoProductoMencionado) {
-    promptCompleto += `\n\nCONTEXTO ACTUAL: El último producto que mostraste al cliente fue "${ultimoProductoMencionado}". Si el cliente dice "este", "ese", "me gusta", etc., se refiere a este producto específicamente.`;
+    promptCompleto += `\n\nÚltimo producto mostrado: "${ultimoProductoMencionado}". Si dice "este", "ese", "me gusta", se refiere a este.`;
   }
 
   // Construir mensajes con historial
@@ -633,8 +662,9 @@ RECUERDA: USA SIEMPRE formato WhatsApp con *negritas* y emojis en CADA respuesta
     }
   ];
 
-  // Agregar historial de conversación (últimos 5 intercambios)
-  for (const item of historial) {
+  // Agregar historial de conversación (últimos 3 intercambios = 6 mensajes)
+  const historialLimitado = historial.slice(-6);
+  for (const item of historialLimitado) {
     mensajes.push({
       role: item.role,
       content: item.content
@@ -654,10 +684,10 @@ RECUERDA: USA SIEMPRE formato WhatsApp con *negritas* y emojis en CADA respuesta
       'Authorization': `Bearer ${config.apiKey}`
     },
     body: JSON.stringify({
-      model: config.modelo || 'gpt-4',
+      model: config.modelo || 'gpt-4o-mini',
       messages: mensajes,
       temperature: config.temperatura || 0.7,
-      max_tokens: config.maxTokens || 500
+      max_tokens: config.maxTokens || 250
     })
   });
 
