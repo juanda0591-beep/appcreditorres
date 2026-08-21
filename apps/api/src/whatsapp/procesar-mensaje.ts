@@ -12,6 +12,7 @@ import {
 } from './gestor-pedidos.js';
 import { obtenerConfiguracion } from '../servicios/configuracion.js';
 import { enviarMensajeWhatsApp } from './baileys-client.js';
+import { enviarNotificacionPedido } from '../servicios/notificaciones-push.js';
 
 const { productos } = esquema;
 
@@ -305,6 +306,15 @@ ${resumenConversacion}`;
           } else {
             console.warn('⚠️ No hay número de vendedor configurado - pedido guardado pero sin aviso');
           }
+
+          // Enviar notificación push a todos los usuarios suscritos
+          await enviarNotificacionPedido({
+            titulo: '🛒 Nuevo cliente interesado',
+            mensaje: `${nombreContacto || telefonoCliente} está interesado en ${ultimoProducto.nombre}`,
+            telefono: telefonoCliente,
+            producto: ultimoProducto.nombre
+          });
+          console.log('✅ Notificación push enviada');
         } catch (error) {
           console.error('Error al enviar aviso al vendedor:', error);
           // No fallar la respuesta al cliente si falla el aviso al vendedor

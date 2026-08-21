@@ -65,6 +65,61 @@ self.addEventListener('message', (evento) => {
   if (evento.data === 'activar-ahora') self.skipWaiting();
 });
 
+// Manejar notificaciones push
+self.addEventListener('push', (evento) => {
+  if (!evento.data) return;
+
+  try {
+    const datos = evento.data.json();
+    const opciones = {
+      body: datos.body,
+      icon: datos.icon || '/icono-192.png',
+      badge: datos.badge || '/icono-192.png',
+      tag: datos.tag || 'notificacion',
+      requireInteraction: true, // La notificación permanece hasta que el usuario interactúe
+      data: datos.data || {},
+      vibrate: [200, 100, 200], // Patrón de vibración
+      actions: [
+        { action: 'abrir', title: 'Ver pedido' },
+        { action: 'cerrar', title: 'Cerrar' }
+      ]
+    };
+
+    evento.waitUntil(
+      self.registration.showNotification(datos.title, opciones)
+    );
+  } catch (error) {
+    console.error('Error al mostrar notificación:', error);
+  }
+});
+
+// Manejar clics en notificaciones
+self.addEventListener('notificationclick', (evento) => {
+  evento.notification.close();
+
+  if (evento.action === 'cerrar') {
+    return;
+  }
+
+  // Abrir la URL especificada en la notificación o la página de admin
+  const urlDestino = evento.notification.data?.url || '/admin';
+
+  evento.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      // Si ya hay una ventana abierta con la app, enfocarla
+      for (const client of clientList) {
+        if (client.url.includes(self.location.origin) && 'focus' in client) {
+          return client.focus().then(() => client.navigate(urlDestino));
+        }
+      }
+      // Si no hay ventana abierta, abrir una nueva
+      if (clients.openWindow) {
+        return clients.openWindow(urlDestino);
+      }
+    })
+  );
+});
+
 self.addEventListener('fetch', (evento) => {
   const peticion = evento.request;
 

@@ -10,6 +10,7 @@ import {
 } from '../api/hooks.js';
 import { Aviso, Boton, BotonChico, Cargando } from '../componentes/base.js';
 import { confirmarPeligro, avisar, avisarError } from '../utilidades/alertas.js';
+import { NotificacionesPush } from '../componentes/NotificacionesPush.js';
 
 /**
  * Ajustes de lo que se comparte por WhatsApp.
@@ -280,6 +281,8 @@ export function Ajustes() {
           })}
         />
       </div>
+
+      <NotificacionesPush />
 
       <Boton submit cargando={guardar.isPending}>
         Guardar ajustes

@@ -9,3 +9,4 @@ export * from './productos.js';
 export * from './configuracion.js';
 export * from './usuarios.js';
 export * from './whatsapp.js';
+export * from './notificaciones.js';

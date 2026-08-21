@@ -28,6 +28,7 @@ import { rutasWhatsapp } from './rutas/whatsapp.js';
 import { rutasAdminWhatsApp } from './rutas/admin-whatsapp.js';
 import { rutasAdminIA } from './rutas/admin-ia.js';
 import { rutasPedidos } from './rutas/pedidos.js';
+import { rutasNotificaciones } from './rutas/notificaciones.js';
 import { verificarSesion, soloAdmin } from './autenticacion.js';
 
 /**
@@ -186,6 +187,7 @@ export async function construirApp(): Promise<FastifyInstance> {
     await privado.register(rutasAdminWhatsApp, { prefix: '/api' });
     await privado.register(rutasAdminIA, { prefix: '/api' });
     await privado.register(rutasPedidos, { prefix: '/api' });
+    await privado.register(rutasNotificaciones);
   });
 
   // El catalogo lo puede administrar tambien el rol 'catalogo'.
