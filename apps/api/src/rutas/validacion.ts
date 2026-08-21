@@ -146,6 +146,7 @@ export const zProductoParcial = zNuevoProducto.partial();
 export const zConfiguracion = z.object({
   nombreNegocio: z.string().trim().min(1, 'El nombre del negocio es obligatorio').max(120),
   whatsappNumero: z.string().trim().max(25).nullish(),
+  whatsappVendedor: z.string().trim().max(25).nullish(),
   tituloCatalogo: z.string().trim().min(1, 'El titulo es obligatorio').max(120),
   descripcionCatalogo: z.string().trim().max(300).nullish(),
   plantillaMensaje: z.string().trim().min(1).max(500),

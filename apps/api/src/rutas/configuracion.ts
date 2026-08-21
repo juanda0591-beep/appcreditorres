@@ -31,6 +31,17 @@ export const rutasConfiguracion: FastifyPluginAsyncZod = async (app) => {
         cambios.whatsappNumero = normalizado;
       }
 
+      if (cambios.whatsappVendedor) {
+        const normalizado = normalizarNumero(cambios.whatsappVendedor);
+        if (!normalizado) {
+          throw new ErrorDatosInvalidos(
+            `El numero de vendedor "${cambios.whatsappVendedor}" no parece valido. ` +
+              `Escribelo con indicativo, por ejemplo: 3001234567`,
+          );
+        }
+        cambios.whatsappVendedor = normalizado;
+      }
+
       return actualizarConfiguracion(cambios);
     },
   });

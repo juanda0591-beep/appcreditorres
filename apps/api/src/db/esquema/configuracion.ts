@@ -22,6 +22,12 @@ export const configuracion = sqliteTable('configuracion', {
    */
   whatsappNumero: text('whatsapp_numero'),
 
+  /**
+   * Numero de WhatsApp del vendedor humano que recibe el aviso cuando un
+   * cliente muestra intencion de compra en el agente de IA.
+   */
+  whatsappVendedor: text('whatsapp_vendedor'),
+
   /** Titulo que se ve arriba del catalogo y en la vista previa de WhatsApp. */
   tituloCatalogo: text('titulo_catalogo').notNull().default('Catalogo de productos'),
 

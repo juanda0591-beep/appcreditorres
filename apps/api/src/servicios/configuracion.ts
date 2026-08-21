@@ -46,6 +46,7 @@ function aConfiguracion(fila: typeof configuracion.$inferSelect): Configuracion 
   return {
     nombreNegocio: fila.nombreNegocio,
     whatsappNumero: fila.whatsappNumero,
+    whatsappVendedor: fila.whatsappVendedor,
     tituloCatalogo: fila.tituloCatalogo,
     descripcionCatalogo: fila.descripcionCatalogo,
     plantillaMensaje: fila.plantillaMensaje,

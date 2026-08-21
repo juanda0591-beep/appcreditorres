@@ -66,8 +66,8 @@ export async function clienteAutenticado(
   return {
     cookie,
     get: (url) => conCookie({ method: 'GET', url }),
-    post: (url, payload) => conCookie({ method: 'POST', url, payload: payload ?? {} }),
-    patch: (url, payload) => conCookie({ method: 'PATCH', url, payload: payload ?? {} }),
+    post: (url, payload) => conCookie({ method: 'POST', url, payload: payload ?? {} as any }),
+    patch: (url, payload) => conCookie({ method: 'PATCH', url, payload: payload ?? {} as any }),
     delete: (url) => conCookie({ method: 'DELETE', url }),
     crudo: (opciones) => conCookie(opciones),
   };

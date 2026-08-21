@@ -26,6 +26,7 @@ export function Ajustes() {
   const [datos, setDatos] = useState({
     nombreNegocio: '',
     whatsappNumero: '',
+    whatsappVendedor: '',
     tituloCatalogo: '',
     descripcionCatalogo: '',
     plantillaMensaje: '',
@@ -43,6 +44,7 @@ export function Ajustes() {
     setDatos({
       nombreNegocio: c.nombreNegocio,
       whatsappNumero: c.whatsappNumero ?? '',
+      whatsappVendedor: c.whatsappVendedor ?? '',
       tituloCatalogo: c.tituloCatalogo,
       descripcionCatalogo: c.descripcionCatalogo ?? '',
       plantillaMensaje: c.plantillaMensaje,
@@ -63,6 +65,7 @@ export function Ajustes() {
     await guardar.mutateAsync({
       ...datos,
       whatsappNumero: datos.whatsappNumero || null,
+      whatsappVendedor: datos.whatsappVendedor || null,
       descripcionCatalogo: datos.descripcionCatalogo || null,
       notaPie: datos.notaPie || null,
     });
@@ -119,6 +122,24 @@ export function Ajustes() {
           <p className="mt-1 text-xs text-slate-500">
             A este numero le escriben los clientes desde el catalogo. Puedes escribirlo con espacios
             o guiones: se normaliza al guardar.
+          </p>
+        </div>
+
+        <div>
+          <label className="etiqueta" htmlFor="wa-vendedor">
+            Numero del vendedor
+          </label>
+          <input
+            id="wa-vendedor"
+            type="tel"
+            className="campo"
+            value={datos.whatsappVendedor}
+            onChange={(e) => cambiar('whatsappVendedor', e.target.value)}
+            placeholder="3001234567"
+          />
+          <p className="mt-1 text-xs text-slate-500">
+            A este numero le llegan los avisos cuando un cliente quiere comprar, para que un
+            vendedor lo contacte directamente.
           </p>
         </div>
 

@@ -1,10 +1,10 @@
 import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
-  proto
+  isPnUser,
+  jidDecode
 } from '@whiskeysockets/baileys';
-
-type WAMessage = proto.IWebMessageInfo;
+import type { WAMessage, WAMessageKey } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import qrcode from 'qrcode-terminal';
 import QRCode from 'qrcode';
@@ -81,6 +81,20 @@ export async function conectarWhatsApp() {
 }
 
 /**
+ * Extrae el numero de telefono real (JID @s.whatsapp.net) de la llave de un
+ * mensaje. En Baileys v7, cuando WhatsApp direcciona por LID, remoteJid es un
+ * codigo interno "@lid" y el numero real (si esta disponible) viene en
+ * remoteJidAlt. Devuelve solo los digitos, sin el sufijo @s.whatsapp.net.
+ */
+function extraerNumeroTelefono(key: WAMessageKey): string | undefined {
+  const candidato = isPnUser(key.remoteJid ?? undefined) ? key.remoteJid : key.remoteJidAlt;
+  if (!candidato) return undefined;
+
+  const decodificado = jidDecode(candidato);
+  return decodificado?.user;
+}
+
+/**
  * Maneja un mensaje entrante
  */
 async function manejarMensaje(mensaje: WAMessage) {
@@ -96,10 +110,15 @@ async function manejarMensaje(mensaje: WAMessage) {
 
     if (!textoMensaje) return;
 
-    console.info('Mensaje recibido', { remitente, texto: textoMensaje });
+    // Con Baileys v7, remoteJid puede venir como JID "@lid" (identificador
+    // interno) en vez del numero real "@s.whatsapp.net". El numero real, si
+    // existe, viaja en remoteJidAlt.
+    const numeroReal = extraerNumeroTelefono(mensaje.key);
+
+    console.info('Mensaje recibido', { remitente, numeroReal, texto: textoMensaje });
 
     // Procesar el mensaje con el agente de IA
-    const respuesta = await procesarMensajeWhatsApp(remitente, textoMensaje);
+    const respuesta = await procesarMensajeWhatsApp(remitente, textoMensaje, mensaje.pushName ?? undefined, numeroReal);
 
     // Enviar respuesta
     if (respuesta && socket) {
@@ -159,7 +178,6 @@ export async function enviarImagenWhatsApp(telefono: string, urlImagen: string, 
     throw error;
   }
 }
-
 
 /**
  * Desconecta de WhatsApp

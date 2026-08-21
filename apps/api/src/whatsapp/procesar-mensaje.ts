@@ -7,10 +7,11 @@ import { config } from '../config.js';
 import {
   detectarIntencionCompra,
   detectarInteres,
-  iniciarPedido,
-  procesarRespuestaPedido,
-  tienePedidoEnProceso
+  registrarPedidoSimple,
+  generarNumeroPedido
 } from './gestor-pedidos.js';
+import { obtenerConfiguracion } from '../servicios/configuracion.js';
+import { enviarMensajeWhatsApp } from './baileys-client.js';
 
 const { productos } = esquema;
 
@@ -219,31 +220,25 @@ async function obtenerCatalogo(): Promise<string> {
  */
 export async function procesarMensajeWhatsApp(
   remitente: string,
-  mensaje: string
+  mensaje: string,
+  nombreContacto?: string,
+  numeroTelefono?: string
 ): Promise<string> {
   try {
     console.log(`Procesando mensaje de ${remitente}: ${mensaje}`);
 
-    // PRIORIDAD 1: Verificar si hay un pedido en proceso
-    if (tienePedidoEnProceso(remitente)) {
-      const resultado = procesarRespuestaPedido(remitente, mensaje);
+    // Delay de 3 segundos para simular escritura natural ANTES de todo
+    await new Promise(resolve => setTimeout(resolve, 3000));
 
-      // Guardar log
-      agregarLog(remitente, mensaje, resultado.mensaje, true);
-
-      return resultado.mensaje;
-    }
-
-    // PRIORIDAD 2: Detectar CONFIRMACIÓN de compra (no solo interés)
-    // Solo iniciamos recopilación cuando el cliente confirma claramente que quiere comprar
+    // PRIORIDAD 1: Detectar CONFIRMACIÓN de compra
     if (detectarIntencionCompra(mensaje)) {
       // Obtener el último producto mencionado del historial
-      const historial = historialConversaciones.get(remitente) || [];
+      const historialCompra = historialConversaciones.get(remitente) || [];
       let ultimoProducto = null;
 
-      for (let i = historial.length - 1; i >= 0; i--) {
-        if (historial[i].productos && historial[i].productos!.length > 0) {
-          const nombreProducto = historial[i].productos![historial[i].productos!.length - 1];
+      for (let i = historialCompra.length - 1; i >= 0; i--) {
+        if (historialCompra[i].productos && historialCompra[i].productos!.length > 0) {
+          const nombreProducto = historialCompra[i].productos![historialCompra[i].productos!.length - 1];
 
           // Buscar el producto para obtener el precio
           const productosVisibles = await db
@@ -268,9 +263,56 @@ export async function procesarMensajeWhatsApp(
       }
 
       if (ultimoProducto) {
-        const respuestaInicio = iniciarPedido(remitente, [ultimoProducto]);
-        agregarLog(remitente, mensaje, respuestaInicio, true);
-        return respuestaInicio;
+        console.log('🎯 Detectada intención de compra - Guardando pedido y avisando al vendedor');
+
+        // remitente puede ser un JID interno "@lid" (Baileys v7); el numero
+        // real para mostrarle al vendedor es numeroTelefono si vino disponible.
+        const telefonoCliente = numeroTelefono || remitente.split('@')[0];
+
+        // Armar resumen corto de la conversación
+        const ultimosMensajes = historialCompra.slice(-6); // Últimos 3 intercambios
+        const resumenConversacion = ultimosMensajes
+          .map(m => `${m.role === 'user' ? 'Cliente' : 'María'}: ${m.content}`)
+          .join('\n');
+
+        // Guardar pedido simple en la base de datos
+        try {
+          await registrarPedidoSimple({
+            telefono: telefonoCliente,
+            nombreContacto,
+            producto: ultimoProducto,
+            resumenConversacion
+          });
+        } catch (error) {
+          console.error('Error al guardar pedido simple:', error);
+        }
+
+        // Enviar aviso al vendedor si está configurado
+        try {
+          const config = await obtenerConfiguracion();
+          if (config.whatsappVendedor) {
+            const mensajeAviso = `🛒 *Nuevo cliente interesado*
+
+📱 Contactar a: *${telefonoCliente}*
+${nombreContacto ? `👤 Nombre en WhatsApp: ${nombreContacto}\n` : ''}
+📦 Producto: *${ultimoProducto.nombre}* - $${ultimoProducto.precio.toLocaleString()}
+
+💬 Resumen de la conversación:
+${resumenConversacion}`;
+
+            await enviarMensajeWhatsApp(config.whatsappVendedor, mensajeAviso);
+            console.log('✅ Aviso enviado al vendedor:', config.whatsappVendedor);
+          } else {
+            console.warn('⚠️ No hay número de vendedor configurado - pedido guardado pero sin aviso');
+          }
+        } catch (error) {
+          console.error('Error al enviar aviso al vendedor:', error);
+          // No fallar la respuesta al cliente si falla el aviso al vendedor
+        }
+
+        const respuesta = '¡Perfecto! 🎉 Ya avisé a uno de nuestros asesores para que te contacte y te ayude a cerrar tu pedido. En un momento te escribe 😊';
+        agregarLog(remitente, mensaje, respuesta, true);
+        return respuesta;
       } else {
         const respuesta = 'Para hacer un pedido, primero déjame mostrarte nuestros productos. ¿Qué estás buscando? 😊';
         agregarLog(remitente, mensaje, respuesta, true);
@@ -278,7 +320,7 @@ export async function procesarMensajeWhatsApp(
       }
     }
 
-    // PRIORIDAD 3: Procesamiento normal con IA
+    // PRIORIDAD 2: Procesamiento normal con IA
     // Aquí la IA maneja todo, incluyendo cuando el cliente muestra interés inicial
     // El agente ampliará información y actuará como vendedor profesional
     // Obtener configuración de IA
@@ -299,6 +341,7 @@ export async function procesarMensajeWhatsApp(
     // Llamar a la IA (OpenAI)
     try {
       const catalogo = await obtenerCatalogo();
+
       const respuesta = await consultarIA(mensaje, configIA, catalogo, historial);
 
       // Detectar productos mencionados en esta conversación
@@ -612,6 +655,6 @@ RECUERDA: USA SIEMPRE formato WhatsApp con *negritas* y emojis en CADA respuesta
     throw new Error(`Error de OpenAI: ${response.status} ${response.statusText}`);
   }
 
-  const data = await response.json();
+  const data: any = await response.json();
   return data.choices[0]?.message?.content || 'Lo siento, no pude generar una respuesta.';
 }

@@ -1,0 +1,1 @@
+ALTER TABLE `configuracion` ADD `whatsapp_vendedor` text;

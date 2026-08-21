@@ -10,6 +10,12 @@ export interface Configuracion {
   /** Numero de WhatsApp con indicador de pais. Ej: 573001234567 */
   whatsappNumero: string | null;
 
+  /**
+   * Numero de WhatsApp del vendedor que recibe el aviso cuando un cliente
+   * muestra intencion de compra en el agente de IA. Ej: 573001234567
+   */
+  whatsappVendedor: string | null;
+
   tituloCatalogo: string;
   descripcionCatalogo: string | null;
 
