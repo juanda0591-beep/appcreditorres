@@ -40,6 +40,11 @@ async function iniciar(): Promise<void> {
 
   try {
     await app.listen({ port: config.puerto, host: config.host });
+
+    // Notificar a PM2 que el servidor está listo (para zero-downtime deployments)
+    if (process.send) {
+      process.send('ready');
+    }
   } catch (error) {
     app.log.error({ err: error }, 'No se pudo iniciar el servidor');
     process.exit(1);
