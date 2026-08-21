@@ -672,7 +672,9 @@ export function PaginaAdmin() {
                 cursor: 'pointer'
               }}
             >
+              <option value="gpt-4o-mini">GPT-4o Mini (Recomendado - 15x más económico)</option>
               <option value="gpt-4">GPT-4</option>
+              <option value="gpt-4o">GPT-4o</option>
               <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
               <option value="gpt-4-turbo">GPT-4 Turbo</option>
             </select>
