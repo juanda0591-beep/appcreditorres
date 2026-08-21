@@ -131,7 +131,8 @@ export function opcionesCookie(expiraEn: string) {
     // sameSite lax: no se envia desde otros sitios, lo que corta los ataques
     // donde una pagina ajena hace peticiones en nombre del usuario.
     sameSite: 'lax' as const,
-    expires: new Date(expiraEn),
+    // NO establecer expires ni maxAge para que sea una cookie de sesión
+    // que se elimina automáticamente al cerrar el navegador
     signed: true,
   };
 }
