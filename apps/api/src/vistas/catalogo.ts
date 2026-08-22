@@ -48,6 +48,24 @@ function escAttr(texto: string | null | undefined): string {
   return esc(texto);
 }
 
+/**
+ * Escapa texto para meterlo en un string JS (comillas simples) que vive
+ * dentro de una etiqueta <script> real.
+ *
+ * No basta con escapar la comilla: si el nombre trae "</script>", el
+ * parser de HTML cierra la etiqueta ahi mismo (antes de que el motor de JS
+ * vea nada), y el resto queda como markup ejecutable en la pagina. Por eso
+ * ademas se escapan "<" y ">" como </>.
+ */
+function escJS(texto: string): string {
+  return texto
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\n/g, '\\n')
+    .replace(/</g, '\\u003C')
+    .replace(/>/g, '\\u003E');
+}
+
 function tarjetaProducto(
   producto: ProductoCatalogo,
   ajustes: Configuracion,
@@ -92,8 +110,8 @@ function tarjetaProducto(
     : '';
 
   // Preparar datos para compartir (escapados para JavaScript)
-  const nombreJS = producto.nombre.replace(/'/g, "\\'").replace(/\n/g, '\\n');
-  const descripcionJS = producto.descripcion ? producto.descripcion.replace(/'/g, "\\'").replace(/\n/g, '\\n') : '';
+  const nombreJS = escJS(producto.nombre);
+  const descripcionJS = producto.descripcion ? escJS(producto.descripcion) : '';
 
   return `
     <article class="producto${producto.disponible ? '' : ' agotado'}" data-nombre="${escAttr(producto.nombre.toLowerCase())}" data-categoria="${escAttr(producto.categoria || '')}" data-precio-min="${producto.precioContado || producto.precioCredicontado || producto.precioCredito}">
