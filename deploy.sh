@@ -19,23 +19,27 @@ git pull origin main
 echo "📚 Instalando dependencias..."
 npm install
 
-# 4. Compilar backend
+# 4. Compilar el paquete compartido (api y web dependen de su dist/)
+echo "🔧 Compilando paquete compartido..."
+npm run build -w @credito/shared
+
+# 5. Compilar backend
 echo "🔨 Compilando backend..."
 npm run build -w @credito/api
 
-# 5. Compilar frontend
+# 6. Compilar frontend
 echo "🎨 Compilando frontend..."
 npm run build -w @credito/web
 
-# 6. Recargar PM2 sin downtime (reload en lugar de restart)
+# 7. Recargar PM2 sin downtime (reload en lugar de restart)
 echo "🔄 Recargando aplicación sin downtime..."
 /usr/lib/node_modules/pm2/bin/pm2 reload ecosystem.config.js --update-env
 
-# 7. Esperar a que la app esté lista
+# 8. Esperar a que la app esté lista
 echo "⏳ Esperando que la aplicación esté lista..."
 sleep 3
 
-# 8. Verificar estado
+# 9. Verificar estado
 echo "✅ Verificando estado..."
 /usr/lib/node_modules/pm2/bin/pm2 status
 
