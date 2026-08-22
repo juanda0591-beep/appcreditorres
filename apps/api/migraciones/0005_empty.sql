@@ -1,1 +1,0 @@
--- Migración vacía para mantener la secuencia

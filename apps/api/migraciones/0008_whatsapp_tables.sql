@@ -13,7 +13,7 @@ CREATE TABLE `campanas_whatsapp` (
 	`creado_en` text NOT NULL,
 	`actualizado_en` text NOT NULL
 );
-
+--> statement-breakpoint
 CREATE TABLE `conversaciones_whatsapp` (
 	`id` text PRIMARY KEY NOT NULL,
 	`telefono` text NOT NULL,
@@ -23,7 +23,7 @@ CREATE TABLE `conversaciones_whatsapp` (
 	`creado_en` text NOT NULL,
 	`actualizado_en` text NOT NULL
 );
-
+--> statement-breakpoint
 CREATE TABLE `mensajes_whatsapp` (
 	`id` text PRIMARY KEY NOT NULL,
 	`conversacion_id` text NOT NULL,
@@ -33,7 +33,7 @@ CREATE TABLE `mensajes_whatsapp` (
 	`creado_en` text NOT NULL,
 	FOREIGN KEY (`conversacion_id`) REFERENCES `conversaciones_whatsapp`(`id`) ON UPDATE no action ON DELETE no action
 );
-
+--> statement-breakpoint
 CREATE TABLE `pedidos_whatsapp` (
 	`id` text PRIMARY KEY NOT NULL,
 	`conversacion_id` text NOT NULL,
