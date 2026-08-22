@@ -81,6 +81,14 @@ export const zNuevoMunicipio = z.object({
   baseBono: z.enum(['excedente', 'total']).optional(),
 });
 
+export const zNuevaZonaVenta = z.object({
+  nombre: z.string().trim().min(1, 'El nombre es obligatorio').max(120),
+  whatsappVendedor: z.string().trim().min(1, 'El numero del vendedor es obligatorio').max(25),
+  activo: z.boolean().optional(),
+});
+
+export const zZonaVentaParcial = zNuevaZonaVenta.partial();
+
 export const zNuevaVenta = z.object({
   empleadoId: zId,
   municipioId: zId.nullish(),

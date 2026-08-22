@@ -40,22 +40,50 @@
     {
       "idx": 5,
       "version": "6",
+      "when": 1786584631061,
+      "tag": "0005_add_product_prices",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1786584631062,
+      "tag": "0006_add_badges",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1786584631063,
+      "tag": "0007_add_user_permissions",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
       "when": 1786826359340,
       "tag": "0008_whatsapp_tables",
       "breakpoints": true
     },
     {
-      "idx": 6,
+      "idx": 9,
       "version": "6",
       "when": 1787169790014,
       "tag": "0006_omniscient_mephistopheles",
       "breakpoints": true
     },
     {
-      "idx": 7,
+      "idx": 10,
       "version": "6",
       "when": 1787320139860,
       "tag": "0007_regular_inertia",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1787409610169,
+      "tag": "0008_melted_wallop",
       "breakpoints": true
     }
   ]

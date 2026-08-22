@@ -38,6 +38,7 @@ export const pedidosWhatsapp = sqliteTable('pedidos_whatsapp', {
   telefono: text('telefono').notNull(),
   nombreCliente: text('nombre_cliente').notNull(),
   direccion: text('direccion'),
+  zona: text('zona'), // Nombre de la zona de venta detectada, si aplica
   productos: text('productos').notNull(), // JSON array de productos
   total: integer('total').notNull(), // En centavos
   estado: text('estado').notNull().default('pendiente'), // pendiente, confirmado, enviado, entregado, cancelado

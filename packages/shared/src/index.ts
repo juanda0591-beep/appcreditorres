@@ -16,6 +16,7 @@ export * from './types/caja.js';
 export * from './types/producto.js';
 export * from './types/configuracion.js';
 export * from './types/usuario.js';
+export * from './types/zona-venta.js';
 
 export * from './nomina/calcular.js';
 export * from './nomina/comprobante.js';

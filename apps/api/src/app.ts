@@ -16,6 +16,7 @@ import { config } from './config.js';
 import { ErrorAplicacion } from './errores.js';
 import { rutasEmpleados } from './rutas/empleados.js';
 import { rutasMunicipios } from './rutas/municipios.js';
+import { rutasZonasVenta } from './rutas/zonas-venta.js';
 import { rutasVentas, rutasCobros, rutasGastos } from './rutas/operaciones.js';
 import { rutasNomina } from './rutas/nomina.js';
 import { rutasCaja } from './rutas/caja.js';
@@ -193,6 +194,9 @@ export async function construirApp(): Promise<FastifyInstance> {
   // El catalogo lo puede administrar tambien el rol 'catalogo'.
   await app.register(rutasProductos, { prefix: '/api/productos' });
   await app.register(rutasConfiguracion, { prefix: '/api/configuracion' });
+  // Vive junto a configuracion porque se edita desde la misma pantalla de
+  // Ajustes, a la que tambien entra el rol 'catalogo'.
+  await app.register(rutasZonasVenta, { prefix: '/api/zonas-venta' });
 
   // Rutas de WhatsApp - incluyen webhook público
   await app.register(rutasWhatsapp, { prefix: '/api/whatsapp' });

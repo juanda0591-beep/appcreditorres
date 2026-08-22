@@ -8,7 +8,9 @@ import {
   detectarIntencionCompra,
   detectarInteres,
   registrarPedidoSimple,
-  generarNumeroPedido
+  generarNumeroPedido,
+  obtenerZonasVentaActivas,
+  detectarZonaEnMensaje
 } from './gestor-pedidos.js';
 import { obtenerConfiguracion } from '../servicios/configuracion.js';
 import { enviarMensajeWhatsApp } from './baileys-client.js';
@@ -19,6 +21,27 @@ const { productos } = esquema;
 // Almacenar historial de conversaciones en memoria
 // Estructura: { numeroTelefono: [{ role: 'user'|'assistant', content: string }] }
 const historialConversaciones = new Map<string, Array<{ role: 'user' | 'assistant', content: string, productos?: string[] }>>();
+
+interface ProductoPedidoPendiente {
+  nombre: string;
+  precio: number;
+  cantidad: number;
+}
+
+interface PedidoPendienteZona {
+  producto: ProductoPedidoPendiente;
+  telefonoCliente: string;
+  nombreContacto?: string;
+  resumenConversacion: string;
+  creadoEn: number;
+}
+
+// Pedidos ya confirmados a los que les falta que el cliente diga su zona.
+// Se descartan solos si pasan mas de 10 minutos sin respuesta, para que un
+// mensaje suelto mucho despues (sin relacion con el pedido) no se tome por
+// error como la respuesta de zona.
+const pedidosPendientesZona = new Map<string, PedidoPendienteZona>();
+const VENCIMIENTO_PENDIENTE_ZONA_MS = 10 * 60 * 1000;
 
 // Almacenar imágenes ya enviadas por cliente
 // Estructura: { numeroTelefono: Set<nombreProducto> }
@@ -271,6 +294,72 @@ async function obtenerProductosRelevantes(mensaje: string): Promise<string> {
 }
 
 /**
+ * Guarda el pedido y avisa al vendedor: si la zona tiene un vendedor
+ * asignado le avisa a el, y si no (o si el cliente no dijo una zona
+ * reconocida) usa el vendedor general de Ajustes como respaldo.
+ */
+async function confirmarPedidoConZona(datos: {
+  producto: ProductoPedidoPendiente;
+  telefonoCliente: string;
+  nombreContacto?: string;
+  resumenConversacion: string;
+  zona: string | null;
+}): Promise<string> {
+  const { producto, telefonoCliente, nombreContacto, resumenConversacion, zona } = datos;
+
+  try {
+    await registrarPedidoSimple({
+      telefono: telefonoCliente,
+      nombreContacto,
+      producto,
+      resumenConversacion,
+      zona
+    });
+  } catch (error) {
+    console.error('Error al guardar pedido simple:', error);
+  }
+
+  try {
+    const zonasActivas = zona ? await obtenerZonasVentaActivas() : [];
+    const zonaConVendedor = zonasActivas.find(z => z.nombre === zona);
+    const config = await obtenerConfiguracion();
+    const numeroDestino = zonaConVendedor?.whatsappVendedor || config.whatsappVendedor;
+
+    if (numeroDestino) {
+      const lineaZona = zona
+        ? `📍 Zona: *${zona}*${zonaConVendedor ? '' : ' (sin vendedor asignado, se avisa al general)'}\n`
+        : '';
+
+      const mensajeAviso = `🛒 *Nuevo cliente interesado*
+
+📱 Contactar a: *${telefonoCliente}*
+${nombreContacto ? `👤 Nombre en WhatsApp: ${nombreContacto}\n` : ''}${lineaZona}📦 Producto: *${producto.nombre}* - $${producto.precio.toLocaleString()}
+
+💬 Resumen de la conversación:
+${resumenConversacion}`;
+
+      await enviarMensajeWhatsApp(numeroDestino, mensajeAviso);
+      console.log('✅ Aviso enviado al vendedor:', numeroDestino);
+    } else {
+      console.warn('⚠️ No hay número de vendedor configurado - pedido guardado pero sin aviso');
+    }
+
+    await enviarNotificacionPedido({
+      titulo: '🛒 Nuevo cliente interesado',
+      mensaje: `${nombreContacto || telefonoCliente} está interesado en ${producto.nombre}`,
+      telefono: telefonoCliente,
+      producto: producto.nombre
+    });
+    console.log('✅ Notificación push enviada');
+  } catch (error) {
+    console.error('Error al enviar aviso al vendedor:', error);
+    // No fallar la respuesta al cliente si falla el aviso al vendedor
+  }
+
+  return '¡Perfecto! 🎉 Ya avisé a uno de nuestros asesores para que te contacte y te ayude a cerrar tu pedido. En un momento te escribe 😊';
+}
+
+/**
  * Procesa un mensaje de WhatsApp y genera una respuesta usando IA
  */
 export async function procesarMensajeWhatsApp(
@@ -284,6 +373,28 @@ export async function procesarMensajeWhatsApp(
 
     // Delay de 3 segundos para simular escritura natural ANTES de todo
     await new Promise(resolve => setTimeout(resolve, 3000));
+
+    // PRIORIDAD 0: el cliente ya confirmo compra y le preguntamos la zona -
+    // este mensaje deberia ser su respuesta con el municipio/zona.
+    const pendienteZona = pedidosPendientesZona.get(remitente);
+    if (pendienteZona) {
+      pedidosPendientesZona.delete(remitente);
+
+      const vencido = Date.now() - pendienteZona.creadoEn > VENCIMIENTO_PENDIENTE_ZONA_MS;
+      if (!vencido) {
+        const zonas = await obtenerZonasVentaActivas();
+        const zonaDetectada = detectarZonaEnMensaje(mensaje, zonas);
+
+        const respuesta = await confirmarPedidoConZona({
+          ...pendienteZona,
+          zona: zonaDetectada?.nombre ?? null,
+        });
+        agregarLog(remitente, mensaje, respuesta, true);
+        return respuesta;
+      }
+      // Si vencio, se sigue con el flujo normal: el mensaje puede no tener
+      // nada que ver con la zona.
+    }
 
     // PRIORIDAD 1: Detectar CONFIRMACIÓN de compra
     if (detectarIntencionCompra(mensaje)) {
@@ -318,8 +429,6 @@ export async function procesarMensajeWhatsApp(
       }
 
       if (ultimoProducto) {
-        console.log('🎯 Detectada intención de compra - Guardando pedido y avisando al vendedor');
-
         // remitente puede ser un JID interno "@lid" (Baileys v7); el numero
         // real para mostrarle al vendedor es numeroTelefono si vino disponible.
         const telefonoCliente = numeroTelefono || remitente.split('@')[0];
@@ -330,51 +439,33 @@ export async function procesarMensajeWhatsApp(
           .map(m => `${m.role === 'user' ? 'Cliente' : 'María'}: ${m.content}`)
           .join('\n');
 
-        // Guardar pedido simple en la base de datos
-        try {
-          await registrarPedidoSimple({
-            telefono: telefonoCliente,
-            nombreContacto,
+        const zonas = await obtenerZonasVentaActivas();
+
+        // Si hay zonas configuradas, primero se pregunta en cual esta el
+        // cliente para avisarle al vendedor correcto. Sin zonas configuradas,
+        // el comportamiento es el de siempre: aviso inmediato al general.
+        if (zonas.length > 0) {
+          pedidosPendientesZona.set(remitente, {
             producto: ultimoProducto,
-            resumenConversacion
+            telefonoCliente,
+            nombreContacto,
+            resumenConversacion,
+            creadoEn: Date.now()
           });
-        } catch (error) {
-          console.error('Error al guardar pedido simple:', error);
+
+          const respuesta = '¡Perfecto! 🎉 Para conectarte con el asesor de tu zona, cuéntame ¿en qué municipio o zona estás ubicado? 📍';
+          agregarLog(remitente, mensaje, respuesta, true);
+          return respuesta;
         }
 
-        // Enviar aviso al vendedor si está configurado
-        try {
-          const config = await obtenerConfiguracion();
-          if (config.whatsappVendedor) {
-            const mensajeAviso = `🛒 *Nuevo cliente interesado*
-
-📱 Contactar a: *${telefonoCliente}*
-${nombreContacto ? `👤 Nombre en WhatsApp: ${nombreContacto}\n` : ''}
-📦 Producto: *${ultimoProducto.nombre}* - $${ultimoProducto.precio.toLocaleString()}
-
-💬 Resumen de la conversación:
-${resumenConversacion}`;
-
-            await enviarMensajeWhatsApp(config.whatsappVendedor, mensajeAviso);
-            console.log('✅ Aviso enviado al vendedor:', config.whatsappVendedor);
-          } else {
-            console.warn('⚠️ No hay número de vendedor configurado - pedido guardado pero sin aviso');
-          }
-
-          // Enviar notificación push a todos los usuarios suscritos
-          await enviarNotificacionPedido({
-            titulo: '🛒 Nuevo cliente interesado',
-            mensaje: `${nombreContacto || telefonoCliente} está interesado en ${ultimoProducto.nombre}`,
-            telefono: telefonoCliente,
-            producto: ultimoProducto.nombre
-          });
-          console.log('✅ Notificación push enviada');
-        } catch (error) {
-          console.error('Error al enviar aviso al vendedor:', error);
-          // No fallar la respuesta al cliente si falla el aviso al vendedor
-        }
-
-        const respuesta = '¡Perfecto! 🎉 Ya avisé a uno de nuestros asesores para que te contacte y te ayude a cerrar tu pedido. En un momento te escribe 😊';
+        console.log('🎯 Detectada intención de compra - Guardando pedido y avisando al vendedor');
+        const respuesta = await confirmarPedidoConZona({
+          producto: ultimoProducto,
+          telefonoCliente,
+          nombreContacto,
+          resumenConversacion,
+          zona: null
+        });
         agregarLog(remitente, mensaje, respuesta, true);
         return respuesta;
       } else {
@@ -614,6 +705,11 @@ CONTEXTO:
 - Si ya enviaste producto y cliente pregunta "cuánto", se refiere al último
 - NO repitas info ya dada
 - Mantén coherencia
+
+FORMAS DE PAGO:
+- Además de contado y crédito, manejamos Addi (compra ahora paga después) y transferencia bancaria
+- Si el cliente duda por el precio o la inicial, ofrece Addi o transferencia como alternativa cómoda
+- No inventes datos de cuenta ni pasos exactos de Addi: eso lo confirma un asesor
 
 EJEMPLOS:
 Cliente: "Hola"

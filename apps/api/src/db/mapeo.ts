@@ -15,6 +15,7 @@ import type {
   MovimientoPrestamo,
   Producto,
   ImagenProducto,
+  ZonaVenta,
 } from '@credito/shared';
 import type {
   EmpleadoFila,
@@ -25,6 +26,7 @@ import type {
   PrestamoEmpleadoFila,
   MovimientoPrestamoFila,
   ProductoFila,
+  ZonaVentaFila,
 } from './esquema/index.js';
 
 export function aEmpleado(fila: EmpleadoFila): Empleado {
@@ -48,6 +50,16 @@ export function aMunicipio(fila: MunicipioFila): Municipio {
     metaRecaudo: fila.metaRecaudo,
     porcentajeExcedente: fila.porcentajeExcedente,
     baseBono: fila.baseBono,
+    activo: fila.activo,
+    creadoEn: fila.creadoEn,
+  };
+}
+
+export function aZonaVenta(fila: ZonaVentaFila): ZonaVenta {
+  return {
+    id: fila.id,
+    nombre: fila.nombre,
+    whatsappVendedor: fila.whatsappVendedor,
     activo: fila.activo,
     creadoEn: fila.creadoEn,
   };

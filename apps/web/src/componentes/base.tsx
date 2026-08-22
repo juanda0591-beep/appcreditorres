@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { AlertCircle, CheckCircle2, Loader2, Inbox, X } from 'lucide-react';
 import { formatearPesos } from '@credito/shared';
 import { ErrorApi } from '../api/cliente.js';
@@ -129,7 +130,16 @@ export function Modal({
     return () => document.removeEventListener('keydown', alTeclear);
   }, [onCerrar]);
 
-  return (
+  /**
+   * Se renderiza en un portal, fuera del arbol donde se use <Modal>.
+   *
+   * Ajustes envuelve toda la pagina en un <form>, y el formulario de este
+   * modal quedaba anidado adentro: HTML invalido, que React solo reporta
+   * como advertencia pero el navegador resuelve mal (el boton "Guardar" no
+   * quedaba asociado a su formulario y el submit no hacia nada). El portal
+   * saca el modal de ese arbol sin importar donde se use.
+   */
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
       onClick={onCerrar}
@@ -157,7 +167,8 @@ export function Modal({
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

@@ -16,6 +16,7 @@ import type {
   Configuracion,
   ConceptoComprobante,
   Periodo,
+  ZonaVenta,
 } from '@credito/shared';
 import { obtener, enviar, parchar, borrar, subirArchivo } from './cliente.js';
 
@@ -33,6 +34,7 @@ export const claves = {
   ahorro: (id: string) => ['empleados', id, 'ahorro'] as const,
   prestamo: (id: string) => ['empleados', id, 'prestamo'] as const,
   municipios: ['municipios'] as const,
+  zonasVenta: ['zonas-venta'] as const,
   ventas: (filtros?: unknown) => ['ventas', filtros] as const,
   cobros: (filtros?: unknown) => ['cobros', filtros] as const,
   gastos: (filtros?: unknown) => ['gastos', filtros] as const,
@@ -236,6 +238,26 @@ export function useGuardarMunicipio() {
       // Cambiar una meta cambia los bonos, asi que la nomina se recalcula.
       cache.invalidateQueries({ queryKey: claves.nomina });
     },
+  });
+}
+
+// ---------- Zonas de venta ----------
+
+export function useZonasVenta() {
+  return useQuery({
+    queryKey: claves.zonasVenta,
+    queryFn: () => obtener<ZonaVenta[]>('/api/zonas-venta'),
+  });
+}
+
+export function useGuardarZonaVenta() {
+  const cache = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...datos }: { id?: string } & Record<string, unknown>) =>
+      id
+        ? parchar<ZonaVenta>(`/api/zonas-venta/${id}`, datos)
+        : enviar<ZonaVenta>('/api/zonas-venta', datos),
+    onSuccess: () => cache.invalidateQueries({ queryKey: claves.zonasVenta }),
   });
 }
 

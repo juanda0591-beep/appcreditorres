@@ -1,14 +1,16 @@
 import { useState, useEffect, type FormEvent, type ChangeEvent } from 'react';
 import { Upload, Image as ImageIcon } from 'lucide-react';
-import { aplicarPlantilla, formatearPesos } from '@credito/shared';
+import { aplicarPlantilla, formatearPesos, type ZonaVenta } from '@credito/shared';
 import {
   useConfiguracion,
   useGuardarConfiguracion,
   useEnlaceCompartir,
   useSubirLogo,
   useQuitarLogo,
+  useZonasVenta,
+  useGuardarZonaVenta,
 } from '../api/hooks.js';
-import { Aviso, Boton, BotonChico, Cargando } from '../componentes/base.js';
+import { Aviso, Boton, BotonChico, Cargando, Modal, Vacio } from '../componentes/base.js';
 import { confirmarPeligro, avisar, avisarError } from '../utilidades/alertas.js';
 import { NotificacionesPush } from '../componentes/NotificacionesPush.js';
 
@@ -128,7 +130,7 @@ export function Ajustes() {
 
         <div>
           <label className="etiqueta" htmlFor="wa-vendedor">
-            Numero del vendedor
+            Numero del vendedor general
           </label>
           <input
             id="wa-vendedor"
@@ -139,13 +141,16 @@ export function Ajustes() {
             placeholder="3001234567"
           />
           <p className="mt-1 text-xs text-slate-500">
-            A este numero le llegan los avisos cuando un cliente quiere comprar, para que un
-            vendedor lo contacte directamente.
+            A este numero le llegan los avisos cuando un cliente quiere comprar. Si abajo
+            configuras vendedores por zona, este solo se usa como respaldo cuando la zona del
+            cliente no tiene vendedor asignado.
           </p>
         </div>
 
         <LogoNegocio logoUrl={configuracion.data?.logoUrl ?? null} />
       </div>
+
+      <VendedoresPorZona />
 
       <div className="tarjeta space-y-3">
         <h2 className="font-semibold">Como se ve el catalogo</h2>
@@ -287,6 +292,151 @@ export function Ajustes() {
       <Boton submit cargando={guardar.isPending}>
         Guardar ajustes
       </Boton>
+    </form>
+  );
+}
+
+/**
+ * Vendedores por zona: cuando un cliente confirma que quiere comprar, el
+ * agente de IA le pregunta en que municipio o zona esta. Si coincide con una
+ * de estas, el aviso va a ese vendedor en vez del vendedor general.
+ */
+function VendedoresPorZona() {
+  const [mostrarForm, setMostrarForm] = useState(false);
+  const zonas = useZonasVenta();
+
+  return (
+    <div className="tarjeta space-y-3">
+      <h2 className="font-semibold">Vendedores por zona</h2>
+      <p className="text-xs text-slate-500">
+        Cuando un cliente confirma que quiere comprar, el agente le pregunta en que municipio o
+        zona esta. Si el nombre coincide con alguno de aqui, el aviso le llega directo al
+        vendedor de esa zona.
+      </p>
+
+      <Boton tipo="secundario" onClick={() => setMostrarForm(true)}>
+        Agregar zona
+      </Boton>
+
+      {mostrarForm && (
+        <Modal titulo="Agregar zona" onCerrar={() => setMostrarForm(false)}>
+          <FormularioZonaVenta onListo={() => setMostrarForm(false)} />
+        </Modal>
+      )}
+
+      {zonas.isLoading && <Cargando />}
+      {zonas.data?.length === 0 && (
+        <Vacio>Todavia no hay zonas configuradas. Se usa el vendedor general para todos.</Vacio>
+      )}
+
+      <div className="space-y-2">
+        {zonas.data?.map((zona) => (
+          <TarjetaZonaVenta key={zona.id} zona={zona} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TarjetaZonaVenta({ zona }: { zona: ZonaVenta }) {
+  const [editando, setEditando] = useState(false);
+
+  return (
+    <>
+      <div className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 p-3">
+        <div>
+          <p className="font-medium">{zona.nombre}</p>
+          <p className="text-xs text-slate-500">{zona.whatsappVendedor}</p>
+        </div>
+        <BotonChico onClick={() => setEditando(true)}>Editar</BotonChico>
+      </div>
+
+      {editando && (
+        <Modal titulo="Editar zona" onCerrar={() => setEditando(false)}>
+          <FormularioZonaVenta zona={zona} onListo={() => setEditando(false)} />
+        </Modal>
+      )}
+    </>
+  );
+}
+
+function FormularioZonaVenta({ zona, onListo }: { zona?: ZonaVenta; onListo: () => void }) {
+  const [nombre, setNombre] = useState(zona?.nombre ?? '');
+  const [whatsappVendedor, setWhatsappVendedor] = useState(zona?.whatsappVendedor ?? '');
+  const [activo, setActivo] = useState(zona?.activo ?? true);
+  const guardar = useGuardarZonaVenta();
+
+  async function enviar(evento: FormEvent) {
+    evento.preventDefault();
+    await guardar.mutateAsync({ id: zona?.id, nombre, whatsappVendedor, activo });
+    onListo();
+  }
+
+  return (
+    <form onSubmit={enviar} className="space-y-3">
+      <Aviso error={guardar.error} />
+
+      <div>
+        <label className="etiqueta" htmlFor="nom-zona">
+          Nombre de la zona <span className="text-red-600">*</span>
+        </label>
+        <input
+          id="nom-zona"
+          type="text"
+          className="campo"
+          value={nombre}
+          onChange={(e) => setNombre(e.target.value)}
+          placeholder="Lejanias"
+          maxLength={120}
+        />
+        <p className="mt-1 text-xs text-slate-500">
+          Tal como lo diria el cliente. Se compara sin tildes ni mayusculas.
+        </p>
+      </div>
+
+      <div>
+        <label className="etiqueta" htmlFor="wa-zona">
+          Numero del vendedor <span className="text-red-600">*</span>
+        </label>
+        <input
+          id="wa-zona"
+          type="tel"
+          className="campo"
+          value={whatsappVendedor}
+          onChange={(e) => setWhatsappVendedor(e.target.value)}
+          placeholder="3001234567"
+        />
+      </div>
+
+      {zona && (
+        <label className="flex cursor-pointer items-start gap-3 rounded-lg bg-slate-50 p-3">
+          <input
+            type="checkbox"
+            className="mt-0.5 size-4 accent-metal-600"
+            checked={activo}
+            onChange={(e) => setActivo(e.target.checked)}
+          />
+          <span className="text-sm">
+            <span className="font-medium">Zona activa</span>
+            <span className="mt-0.5 block text-xs text-slate-600">
+              Si la apagas, el agente deja de reconocer esta zona y usa el vendedor general.
+            </span>
+          </span>
+        </label>
+      )}
+
+      <div className="flex gap-2">
+        <Boton
+          submit
+          cargando={guardar.isPending}
+          deshabilitado={!nombre.trim() || !whatsappVendedor.trim()}
+        >
+          {zona ? 'Guardar cambios' : 'Guardar zona'}
+        </Boton>
+        <Boton tipo="secundario" onClick={onListo}>
+          Cancelar
+        </Boton>
+      </div>
     </form>
   );
 }

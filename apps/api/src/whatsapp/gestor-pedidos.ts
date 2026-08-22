@@ -1,12 +1,17 @@
 import { db, esquema } from '../db/cliente.js';
 import { eq, desc } from 'drizzle-orm';
 
-const { pedidosWhatsapp } = esquema;
+const { pedidosWhatsapp, zonasVenta } = esquema;
 
 interface ProductoPedido {
   nombre: string;
   precio: number;
   cantidad: number;
+}
+
+export interface ZonaVentaActiva {
+  nombre: string;
+  whatsappVendedor: string;
 }
 
 /**
@@ -83,6 +88,46 @@ export function detectarIntencionCompra(mensaje: string): boolean {
   return palabrasClave.some(palabra => mensajeLower.includes(palabra));
 }
 
+/** Quita tildes y pasa a minusculas, para comparar nombres de zona sin depender de como los escriba el cliente. */
+function normalizarTexto(texto: string): string {
+  return texto
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '');
+}
+
+/**
+ * Obtiene las zonas de venta activas configuradas desde el sistema.
+ */
+export async function obtenerZonasVentaActivas(): Promise<ZonaVentaActiva[]> {
+  const filas = await db
+    .select({ nombre: zonasVenta.nombre, whatsappVendedor: zonasVenta.whatsappVendedor })
+    .from(zonasVenta)
+    .where(eq(zonasVenta.activo, true));
+
+  return filas;
+}
+
+/**
+ * Busca si el mensaje del cliente menciona el nombre de alguna zona
+ * configurada. Compara sin tildes ni mayusculas, y acepta que el cliente
+ * escriba una frase completa ("estoy en lejanias") en vez del nombre exacto.
+ */
+export function detectarZonaEnMensaje(
+  mensaje: string,
+  zonas: ZonaVentaActiva[],
+): ZonaVentaActiva | null {
+  const mensajeNormalizado = normalizarTexto(mensaje);
+
+  for (const zona of zonas) {
+    if (mensajeNormalizado.includes(normalizarTexto(zona.nombre))) {
+      return zona;
+    }
+  }
+
+  return null;
+}
+
 /**
  * Generar ID único para pedido
  */
@@ -114,8 +159,9 @@ export async function registrarPedidoSimple(datos: {
   nombreContacto?: string;
   producto: ProductoPedido;
   resumenConversacion: string;
+  zona?: string | null;
 }): Promise<void> {
-  const { telefono, nombreContacto, producto, resumenConversacion } = datos;
+  const { telefono, nombreContacto, producto, resumenConversacion, zona } = datos;
 
   const pedidoData = {
     id: generarIdPedido(),
@@ -123,6 +169,7 @@ export async function registrarPedidoSimple(datos: {
     telefono,
     nombreCliente: nombreContacto || 'Sin nombre',
     direccion: null,
+    zona: zona ?? null,
     productos: JSON.stringify([producto]),
     total: producto.precio * producto.cantidad * 100, // En centavos
     estado: 'pendiente',
