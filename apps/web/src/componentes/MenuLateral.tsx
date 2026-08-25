@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -15,6 +15,10 @@ import {
   UserCog,
   Shield,
   ShoppingCart,
+  MessageCircle,
+  CreditCard,
+  Phone,
+  ChevronDown,
 } from 'lucide-react';
 import { useMediaQuery } from '../utilidades/useMediaQuery.js';
 import type { UsuarioSesion } from '../api/hooks.js';
@@ -25,18 +29,30 @@ export interface Seccion {
   icono: typeof LayoutDashboard;
   /** Si es true, solo lo ve el rol admin. */
   soloAdmin?: boolean;
+  /** Grupo al que pertenece la sección */
+  grupo?: string;
 }
 
 export const SECCIONES: Seccion[] = [
   { ruta: '/', texto: 'Resumen', icono: LayoutDashboard, soloAdmin: true },
   { ruta: '/registrar', texto: 'Registrar', icono: PlusCircle, soloAdmin: true },
-  { ruta: '/nomina', texto: 'Nomina', icono: Wallet, soloAdmin: true },
-  { ruta: '/caja', texto: 'Control de dinero', icono: Landmark, soloAdmin: true },
   { ruta: '/empleados', texto: 'Empleados', icono: Users, soloAdmin: true },
   { ruta: '/productos', texto: 'Catalogo', icono: Package },
-  { ruta: '/pedidos', texto: 'Pedidos WhatsApp', icono: ShoppingCart, soloAdmin: true },
+
+  // Grupo Finanzas
+  { ruta: '/nomina', texto: 'Nómina', icono: Wallet, soloAdmin: true, grupo: 'Finanzas' },
+  { ruta: '/caja', texto: 'Caja', icono: Landmark, soloAdmin: true, grupo: 'Finanzas' },
+
+  // Grupo WhatsApp
+  { ruta: '/admin', texto: 'Administración', icono: Shield, soloAdmin: true, grupo: 'WhatsApp' },
+  { ruta: '/conversaciones', texto: 'Conversaciones', icono: MessageCircle, soloAdmin: true, grupo: 'WhatsApp' },
+  { ruta: '/pedidos', texto: 'Pedidos', icono: ShoppingCart, soloAdmin: true, grupo: 'WhatsApp' },
+
+  // Grupo CRM
+  { ruta: '/crm/cartera', texto: 'Cartera', icono: CreditCard, soloAdmin: true, grupo: 'CRM' },
+  { ruta: '/crm/gestiones', texto: 'Gestión de Cobros', icono: Phone, soloAdmin: true, grupo: 'CRM' },
+
   { ruta: '/usuarios', texto: 'Usuarios', icono: UserCog, soloAdmin: true },
-  { ruta: '/admin', texto: 'Administración', icono: Shield, soloAdmin: true },
   { ruta: '/ajustes', texto: 'Ajustes', icono: Settings },
 ];
 
@@ -111,6 +127,25 @@ export function MenuLateral({ abierto, onCerrar, usuario, onSalir, expandido, on
     (seccion) => !seccion.soloAdmin || usuario.rol === 'admin',
   );
 
+  // Agrupar secciones por grupo
+  const grupos = visibles.reduce((acc, seccion) => {
+    const grupo = seccion.grupo || 'principal';
+    if (!acc[grupo]) acc[grupo] = [];
+    acc[grupo].push(seccion);
+    return acc;
+  }, {} as Record<string, Seccion[]>);
+
+  const ordenGrupos = ['principal', 'Finanzas', 'WhatsApp', 'CRM'];
+
+  const [gruposAbiertos, setGruposAbiertos] = useState<Record<string, boolean>>({
+    Finanzas: true,
+    WhatsApp: false,
+    CRM: false,
+  });
+
+  const toggleGrupo = (grupo: string) => {
+    setGruposAbiertos(prev => ({ ...prev, [grupo]: !prev[grupo] }));
+  };
 
   return (
     <>
@@ -166,49 +201,133 @@ export function MenuLateral({ abierto, onCerrar, usuario, onSalir, expandido, on
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
-          {visibles.map((seccion) => (
-            <NavLink
-              key={seccion.ruta}
-              to={seccion.ruta}
-              end={seccion.ruta === '/'}
-              onClick={onCerrar}
-              title={expandido ? undefined : seccion.texto}
-              /*
-                Texto e icono van blancos en toda la lista. La seccion activa NO
-                se marca cambiando el color de la letra, sino con un fondo claro
-                y una barra a la izquierda: si el estado dependiera del color del
-                texto, distinguirlo exigiria comparar dos blancos.
-              */
-              /*
-                El fondo activo llega hasta blanco 10% y no mas: por encima de
-                ahi el texto blanco encima baja de 4.5:1 contra la parte clara
-                del degradado, y el item activo es justo donde mas hay que leer.
-                Lo que lo distingue del hover es la barra y el peso de la letra,
-                que no cuestan contraste.
-              */
-              className={({ isActive }) =>
-                `foco-claro relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm
-                 transition ${expandido ? '' : 'justify-center lg:px-2'} ${
-                   isActive
-                     ? 'bg-white/10 font-semibold text-white shadow-[inset_0_1px_0_0_rgb(255_255_255/0.1)]'
-                     : 'font-medium text-white/85 hover:bg-white/[0.06] hover:text-white'
-                 }`
-              }
-            >
-              {({ isActive }) => (
-                <>
-                  {isActive && (
-                    <span
-                      aria-hidden
-                      className="absolute top-1/2 left-0 h-5 w-0.5 -translate-y-1/2 rounded-r bg-white"
-                    />
-                  )}
-                  <seccion.icono size={18} className={isActive ? 'text-white' : 'text-white/85'} />
-                  {expandido && <span>{seccion.texto}</span>}
-                </>
-              )}
-            </NavLink>
-          ))}
+          {ordenGrupos.map((nombreGrupo) => {
+            const secciones = grupos[nombreGrupo];
+            if (!secciones || secciones.length === 0) return null;
+
+            // Grupo principal sin acordeón
+            if (nombreGrupo === 'principal') {
+              return (
+                <div key={nombreGrupo}>
+                  {secciones.map((seccion) => (
+                    <NavLink
+                      key={seccion.ruta}
+                      to={seccion.ruta}
+                      end={seccion.ruta === '/'}
+                      onClick={onCerrar}
+                      title={expandido ? undefined : seccion.texto}
+                      className={({ isActive }) =>
+                        `foco-claro relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm
+                         transition ${expandido ? '' : 'justify-center lg:px-2'} ${
+                           isActive
+                             ? 'bg-white/10 font-semibold text-white shadow-[inset_0_1px_0_0_rgb(255_255_255/0.1)]'
+                             : 'font-medium text-white/85 hover:bg-white/[0.06] hover:text-white'
+                         }`
+                      }
+                    >
+                      {({ isActive }) => (
+                        <>
+                          {isActive && (
+                            <span
+                              aria-hidden
+                              className="absolute top-1/2 left-0 h-5 w-0.5 -translate-y-1/2 rounded-r bg-white"
+                            />
+                          )}
+                          <seccion.icono size={18} className={isActive ? 'text-white' : 'text-white/85'} />
+                          {expandido && <span>{seccion.texto}</span>}
+                        </>
+                      )}
+                    </NavLink>
+                  ))}
+                </div>
+              );
+            }
+
+            // Grupos con acordeón
+            const estaAbierto = gruposAbiertos[nombreGrupo];
+            return (
+              <div key={nombreGrupo} className="mt-3">
+                {expandido ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => toggleGrupo(nombreGrupo)}
+                      className="foco-claro w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-white/50 uppercase tracking-wider hover:text-white/70 transition rounded-lg hover:bg-white/5"
+                    >
+                      <span>{nombreGrupo}</span>
+                      <ChevronDown
+                        size={14}
+                        className={`transition-transform ${estaAbierto ? 'rotate-180' : ''}`}
+                      />
+                    </button>
+                    {estaAbierto && (
+                      <div className="mt-1">
+                        {secciones.map((seccion) => (
+                          <NavLink
+                            key={seccion.ruta}
+                            to={seccion.ruta}
+                            end={seccion.ruta === '/'}
+                            onClick={onCerrar}
+                            className={({ isActive }) =>
+                              `foco-claro relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm
+                               transition ${
+                                 isActive
+                                   ? 'bg-white/10 font-semibold text-white shadow-[inset_0_1px_0_0_rgb(255_255_255/0.1)]'
+                                   : 'font-medium text-white/85 hover:bg-white/[0.06] hover:text-white'
+                               }`
+                            }
+                          >
+                            {({ isActive }) => (
+                              <>
+                                {isActive && (
+                                  <span
+                                    aria-hidden
+                                    className="absolute top-1/2 left-0 h-5 w-0.5 -translate-y-1/2 rounded-r bg-white"
+                                  />
+                                )}
+                                <seccion.icono size={18} className={isActive ? 'text-white' : 'text-white/85'} />
+                                <span>{seccion.texto}</span>
+                              </>
+                            )}
+                          </NavLink>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  // Cuando el menú está contraído, mostrar iconos sin agrupar
+                  secciones.map((seccion) => (
+                    <NavLink
+                      key={seccion.ruta}
+                      to={seccion.ruta}
+                      onClick={onCerrar}
+                      title={seccion.texto}
+                      className={({ isActive }) =>
+                        `foco-claro relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm
+                         transition justify-center lg:px-2 ${
+                           isActive
+                             ? 'bg-white/10 font-semibold text-white shadow-[inset_0_1px_0_0_rgb(255_255_255/0.1)]'
+                             : 'font-medium text-white/85 hover:bg-white/[0.06] hover:text-white'
+                         }`
+                      }
+                    >
+                      {({ isActive }) => (
+                        <>
+                          {isActive && (
+                            <span
+                              aria-hidden
+                              className="absolute top-1/2 left-0 h-5 w-0.5 -translate-y-1/2 rounded-r bg-white"
+                            />
+                          )}
+                          <seccion.icono size={18} className={isActive ? 'text-white' : 'text-white/85'} />
+                        </>
+                      )}
+                    </NavLink>
+                  ))
+                )}
+              </div>
+            );
+          })}
         </nav>
 
         <div className="border-t border-white/10 p-3">

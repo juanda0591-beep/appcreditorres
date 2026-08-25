@@ -974,6 +974,43 @@ export function PaginaAdmin() {
         )}
       </div>
 
+      {/* Acceso rápido a historial de conversaciones */}
+      <div style={{
+        marginTop: '30px',
+        border: '1px solid #e5e7eb',
+        borderRadius: '8px',
+        padding: '24px',
+        backgroundColor: '#fff',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+      }}>
+        <h2 style={{ fontSize: '20px', fontWeight: '600', marginBottom: '12px', color: '#111827' }}>
+          Historial de Conversaciones
+        </h2>
+        <p style={{ color: '#6b7280', fontSize: '14px', marginBottom: '16px' }}>
+          Ver el historial completo de conversaciones con clientes, sus compras y seguimiento de pedidos
+        </p>
+        <a
+          href="/conversaciones"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '10px 20px',
+            backgroundColor: '#3b82f6',
+            color: '#fff',
+            fontSize: '14px',
+            fontWeight: '500',
+            borderRadius: '6px',
+            textDecoration: 'none',
+            transition: 'background-color 0.2s'
+          }}
+          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#2563eb'}
+          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#3b82f6'}
+        >
+          Ver Historial de Conversaciones →
+        </a>
+      </div>
+
       {/* Productos Más Consultados */}
       <div style={{
         marginTop: '30px',
