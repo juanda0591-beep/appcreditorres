@@ -16,11 +16,102 @@ import { obtenerConfiguracion } from '../servicios/configuracion.js';
 import { enviarMensajeWhatsApp } from './baileys-client.js';
 import { enviarNotificacionPedido } from '../servicios/notificaciones-push.js';
 
-const { productos } = esquema;
+const { productos, conversacionesWhatsapp, mensajesWhatsapp } = esquema;
 
-// Almacenar historial de conversaciones en memoria
+// Almacenar historial de conversaciones en memoria (cache temporal)
 // Estructura: { numeroTelefono: [{ role: 'user'|'assistant', content: string }] }
 const historialConversaciones = new Map<string, Array<{ role: 'user' | 'assistant', content: string, productos?: string[] }>>();
+
+/**
+ * Obtener o crear conversación en la base de datos
+ */
+async function obtenerOCrearConversacion(telefono: string, nombreCliente?: string): Promise<string> {
+  // Buscar conversación existente activa
+  const conversacionesExistentes = await db
+    .select()
+    .from(conversacionesWhatsapp)
+    .where(eq(conversacionesWhatsapp.telefono, telefono))
+    .limit(1);
+
+  const ahora = new Date().toISOString();
+
+  if (conversacionesExistentes.length > 0) {
+    const conversacion = conversacionesExistentes[0];
+
+    // Actualizar timestamp y nombre si viene disponible
+    await db
+      .update(conversacionesWhatsapp)
+      .set({
+        actualizadoEn: ahora,
+        ...(nombreCliente && { nombreCliente })
+      })
+      .where(eq(conversacionesWhatsapp.id, conversacion.id));
+
+    return conversacion.id;
+  }
+
+  // Crear nueva conversación
+  const conversacionId = `conv_${telefono.replace(/\D/g, '')}_${Date.now()}`;
+  await db.insert(conversacionesWhatsapp).values({
+    id: conversacionId,
+    telefono,
+    nombreCliente: nombreCliente || null,
+    estado: 'activa',
+    ultimoMensaje: null,
+    creadoEn: ahora,
+    actualizadoEn: ahora
+  });
+
+  return conversacionId;
+}
+
+/**
+ * Guardar mensaje en la base de datos
+ */
+async function guardarMensaje(
+  conversacionId: string,
+  rol: 'user' | 'assistant',
+  contenido: string,
+  metadata?: { productos?: string[] }
+): Promise<void> {
+  const mensajeId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+  await db.insert(mensajesWhatsapp).values({
+    id: mensajeId,
+    conversacionId,
+    rol,
+    contenido,
+    metadata: metadata ? JSON.stringify(metadata) : null,
+    creadoEn: new Date().toISOString()
+  });
+
+  // Actualizar último mensaje en la conversación
+  await db
+    .update(conversacionesWhatsapp)
+    .set({
+      ultimoMensaje: contenido.substring(0, 100),
+      actualizadoEn: new Date().toISOString()
+    })
+    .where(eq(conversacionesWhatsapp.id, conversacionId));
+}
+
+/**
+ * Cargar historial desde la base de datos (últimos N mensajes)
+ */
+async function cargarHistorialDesdeDB(conversacionId: string, limite: number = 10): Promise<Array<{ role: 'user' | 'assistant', content: string, productos?: string[] }>> {
+  const mensajes = await db
+    .select()
+    .from(mensajesWhatsapp)
+    .where(eq(mensajesWhatsapp.conversacionId, conversacionId))
+    .orderBy(mensajesWhatsapp.creadoEn)
+    .limit(limite);
+
+  return mensajes.map(m => ({
+    role: m.rol as 'user' | 'assistant',
+    content: m.contenido,
+    productos: m.metadata ? JSON.parse(m.metadata).productos : undefined
+  }));
+}
 
 interface ProductoPedidoPendiente {
   nombre: string;
@@ -374,6 +465,10 @@ export async function procesarMensajeWhatsApp(
     // Delay de 3 segundos para simular escritura natural ANTES de todo
     await new Promise(resolve => setTimeout(resolve, 3000));
 
+    // Obtener o crear conversación en BD (usar numeroTelefono si está disponible, sino remitente)
+    const telefonoParaDB = numeroTelefono || remitente.split('@')[0];
+    const conversacionId = await obtenerOCrearConversacion(telefonoParaDB, nombreContacto);
+
     // PRIORIDAD 0: el cliente ya confirmo compra y le preguntamos la zona -
     // este mensaje deberia ser su respuesta con el municipio/zona.
     const pendienteZona = pedidosPendientesZona.get(remitente);
@@ -385,10 +480,17 @@ export async function procesarMensajeWhatsApp(
         const zonas = await obtenerZonasVentaActivas();
         const zonaDetectada = detectarZonaEnMensaje(mensaje, zonas);
 
+        // Guardar mensaje del usuario en BD
+        await guardarMensaje(conversacionId, 'user', mensaje);
+
         const respuesta = await confirmarPedidoConZona({
           ...pendienteZona,
           zona: zonaDetectada?.nombre ?? null,
         });
+
+        // Guardar respuesta en BD
+        await guardarMensaje(conversacionId, 'assistant', respuesta);
+
         agregarLog(remitente, mensaje, respuesta, true);
         return respuesta;
       }
@@ -398,8 +500,15 @@ export async function procesarMensajeWhatsApp(
 
     // PRIORIDAD 1: Detectar CONFIRMACIÓN de compra
     if (detectarIntencionCompra(mensaje)) {
-      // Obtener el último producto mencionado del historial
-      const historialCompra = historialConversaciones.get(remitente) || [];
+      // Obtener el último producto mencionado del historial (primero de memoria, luego de BD)
+      let historialCompra = historialConversaciones.get(remitente) || [];
+
+      // Si no hay historial en memoria, cargar desde BD
+      if (historialCompra.length === 0) {
+        historialCompra = await cargarHistorialDesdeDB(conversacionId, 10);
+        historialConversaciones.set(remitente, historialCompra);
+      }
+
       let ultimoProducto = null;
 
       for (let i = historialCompra.length - 1; i >= 0; i--) {
@@ -441,6 +550,9 @@ export async function procesarMensajeWhatsApp(
 
         const zonas = await obtenerZonasVentaActivas();
 
+        // Guardar mensaje del usuario en BD
+        await guardarMensaje(conversacionId, 'user', mensaje);
+
         // Si hay zonas configuradas, primero se pregunta en cual esta el
         // cliente para avisarle al vendedor correcto. Sin zonas configuradas,
         // el comportamiento es el de siempre: aviso inmediato al general.
@@ -454,6 +566,10 @@ export async function procesarMensajeWhatsApp(
           });
 
           const respuesta = '¡Perfecto! 🎉 Para conectarte con el asesor de tu zona, cuéntame ¿en qué municipio o zona estás ubicado? 📍';
+
+          // Guardar respuesta en BD
+          await guardarMensaje(conversacionId, 'assistant', respuesta);
+
           agregarLog(remitente, mensaje, respuesta, true);
           return respuesta;
         }
@@ -466,10 +582,19 @@ export async function procesarMensajeWhatsApp(
           resumenConversacion,
           zona: null
         });
+
+        // Guardar respuesta en BD
+        await guardarMensaje(conversacionId, 'assistant', respuesta);
+
         agregarLog(remitente, mensaje, respuesta, true);
         return respuesta;
       } else {
         const respuesta = 'Para hacer un pedido, primero déjame mostrarte nuestros productos. ¿Qué estás buscando? 😊';
+
+        // Guardar mensaje y respuesta en BD
+        await guardarMensaje(conversacionId, 'user', mensaje);
+        await guardarMensaje(conversacionId, 'assistant', respuesta);
+
         agregarLog(remitente, mensaje, respuesta, true);
         return respuesta;
       }
@@ -489,7 +614,9 @@ export async function procesarMensajeWhatsApp(
 
     // Obtener o crear historial de conversación para este usuario
     if (!historialConversaciones.has(remitente)) {
-      historialConversaciones.set(remitente, []);
+      // Cargar desde BD si no está en memoria
+      const historialDB = await cargarHistorialDesdeDB(conversacionId, 10);
+      historialConversaciones.set(remitente, historialDB);
     }
     const historial = historialConversaciones.get(remitente)!;
 
@@ -508,7 +635,7 @@ export async function procesarMensajeWhatsApp(
         registrarMencionProductos(productosMencionados);
       }
 
-      // Agregar mensaje del usuario y respuesta al historial
+      // Agregar mensaje del usuario y respuesta al historial EN MEMORIA
       historial.push({
         role: 'user',
         content: mensaje
@@ -519,10 +646,14 @@ export async function procesarMensajeWhatsApp(
         productos: productosMencionados
       });
 
-      // Mantener solo los últimos 10 mensajes (5 intercambios)
+      // Mantener solo los últimos 10 mensajes en memoria (5 intercambios)
       if (historial.length > 10) {
         historial.splice(0, historial.length - 10);
       }
+
+      // Guardar mensaje del usuario y respuesta EN BASE DE DATOS
+      await guardarMensaje(conversacionId, 'user', mensaje);
+      await guardarMensaje(conversacionId, 'assistant', respuesta, { productos: productosMencionados });
 
       // Enviar imágenes de productos mencionados
       await enviarImagenesProductos(remitente, productosMencionados);
@@ -534,6 +665,10 @@ export async function procesarMensajeWhatsApp(
     } catch (error) {
       console.error('Error al consultar IA:', error);
       const respuestaError = 'Lo siento, hubo un error al procesar tu mensaje. Un asesor te contactará pronto.';
+
+      // Guardar en BD aunque haya error
+      await guardarMensaje(conversacionId, 'user', mensaje);
+      await guardarMensaje(conversacionId, 'assistant', respuestaError);
 
       // Guardar log de actividad con error
       agregarLog(remitente, mensaje, respuestaError, false);
