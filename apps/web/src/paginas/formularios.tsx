@@ -608,45 +608,73 @@ export function FormularioGasto({
   fecha,
   empleadoNombre,
   onListo,
-}: Comunes & { onListo?: (resumen: string) => void }) {
-  const [monto, setMonto] = useState(0);
-  const [concepto, setConcepto] = useState('');
-  const [deducible, setDeducible] = useState(true);
+  inicial,
+  onExito,
+}: Comunes & {
+  onListo?: (resumen: string) => void;
+  inicial?: GastoEmpleado;
+  onExito?: () => void;
+}) {
+  const [monto, setMonto] = useState(inicial?.monto ?? 0);
+  const [concepto, setConcepto] = useState(inicial?.concepto ?? '');
+  const [deducible, setDeducible] = useState(inicial?.deducible ?? true);
   const [listo, setListo] = useState('');
   const registrar = useRegistrarGasto();
+  const editar = useEditarGasto();
+
+  const modoEdicion = Boolean(inicial);
+  const empleadoIdFinal = inicial?.empleadoId ?? empleadoId;
+  const fechaFinal = inicial?.fecha ?? fecha;
+  const municipioIdFinal = inicial?.municipioId ?? municipioId;
 
   async function enviar(evento: FormEvent) {
     evento.preventDefault();
     setListo('');
 
     const seguro = await confirmar({
-      titulo: `Registrar gasto de ${formatearPesos(monto)}?`,
+      titulo: modoEdicion ? `Actualizar gasto de ${formatearPesos(monto)}?` : `Registrar gasto de ${formatearPesos(monto)}?`,
       resumen: [
         { rotulo: 'Empleado', valor: empleadoNombre ?? 'el seleccionado' },
-        { rotulo: 'Fecha', valor: fecha },
+        { rotulo: 'Fecha', valor: fechaFinal },
         { rotulo: 'En que fue', valor: concepto },
         {
-          // Esta es la fila que decide: es la diferencia entre dos pagos
-          // distintos, asi que se destaca en vez de dejarla como un detalle mas.
           rotulo: deducible ? 'Se le descuenta del pago' : 'Lo asume el negocio',
           valor: deducible ? `-${formatearPesos(monto)}` : 'No afecta su pago',
           destacado: true,
         },
       ],
-      confirmar: 'Registrar gasto',
+      confirmar: modoEdicion ? 'Actualizar gasto' : 'Registrar gasto',
     });
     if (!seguro) return;
 
-    await registrar.mutateAsync({
-      empleadoId,
-      municipioId: municipioId || null,
-      fecha,
-      monto,
-      concepto,
-      deducible,
-    });
+    if (modoEdicion) {
+      await editar.mutateAsync({
+        id: inicial!.id,
+        empleadoId: empleadoIdFinal,
+        municipioId: municipioIdFinal || null,
+        fecha: fechaFinal,
+        monto,
+        concepto,
+        deducible,
+      });
+    } else {
+      await registrar.mutateAsync({
+        empleadoId: empleadoIdFinal,
+        municipioId: municipioIdFinal || null,
+        fecha: fechaFinal,
+        monto,
+        concepto,
+        deducible,
+      });
+    }
 
-    const resumen = `Gasto de ${formatearPesos(monto)} registrado`;
+    const resumen = `Gasto de ${formatearPesos(monto)} ${modoEdicion ? 'actualizado' : 'registrado'}`;
+
+    if (modoEdicion && onExito) {
+      onExito();
+      return;
+    }
+
     setMonto(0);
     setConcepto('');
 
@@ -658,7 +686,7 @@ export function FormularioGasto({
   return (
     <form onSubmit={enviar} className="space-y-3">
       {listo && <Listo texto={listo} />}
-      <Aviso error={registrar.error} />
+      <Aviso error={registrar.error ?? editar.error} />
 
       <CampoDinero etiqueta="Monto del gasto" valor={monto} onCambio={setMonto} requerido />
 
@@ -677,11 +705,6 @@ export function FormularioGasto({
         />
       </div>
 
-      {/*
-        Este interruptor decide si el gasto se le descuenta al empleado o lo
-        asume el negocio. Es la diferencia entre dos pagos distintos, asi que
-        se explica en pantalla en vez de asumirlo en silencio.
-      */}
       <label className="flex cursor-pointer items-start gap-3 rounded-lg bg-slate-50 p-3">
         <input
           type="checkbox"
@@ -701,10 +724,10 @@ export function FormularioGasto({
 
       <Boton
         submit
-        cargando={registrar.isPending}
-        deshabilitado={!empleadoId || monto <= 0 || !concepto.trim()}
+        cargando={registrar.isPending || editar.isPending}
+        deshabilitado={!empleadoIdFinal || monto <= 0 || !concepto.trim()}
       >
-        Registrar gasto
+        {modoEdicion ? 'Actualizar gasto' : 'Registrar gasto'}
       </Boton>
     </form>
   );
