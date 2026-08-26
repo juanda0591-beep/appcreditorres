@@ -3,7 +3,7 @@ import { ShoppingCart, HandCoins, Receipt } from 'lucide-react';
 import { useEmpleados, useMunicipios } from '../api/hooks.js';
 import { Cargando, Modal } from '../componentes/base.js';
 import { Pestanas } from '../componentes/Pestanas.js';
-import { HistorialVentas, HistorialCobros } from '../componentes/HistorialOperaciones.js';
+import { HistorialVentas, HistorialCobros, HistorialGastos } from '../componentes/HistorialOperaciones.js';
 import { hoy } from '../utilidades/fechas.js';
 import { FormularioVenta, FormularioCobro, FormularioGasto } from './formularios.js';
 
@@ -15,7 +15,7 @@ const TITULOS: Record<Formulario, string> = {
   gasto: 'Registrar gasto',
 };
 
-type Vista = 'registrar' | 'ventas' | 'cobros';
+type Vista = 'registrar' | 'ventas' | 'cobros' | 'gastos';
 
 /** Pantalla del dia a dia: registrar operaciones y revisar su historial. */
 export function RegistroDiario() {
@@ -30,12 +30,14 @@ export function RegistroDiario() {
           ['registrar', 'Registrar'],
           ['ventas', 'Historial de ventas'],
           ['cobros', 'Historial de cobros'],
+          ['gastos', 'Historial de gastos'],
         ]}
       />
 
       {vista === 'registrar' && <Registrar />}
       {vista === 'ventas' && <HistorialVentas />}
       {vista === 'cobros' && <HistorialCobros />}
+      {vista === 'gastos' && <HistorialGastos />}
     </div>
   );
 }

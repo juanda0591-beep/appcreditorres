@@ -297,6 +297,19 @@ export function useVentas(filtros: FiltrosOperacion = {}) {
 export const useRegistrarVenta = () =>
   useRegistrarOperacion<RegistroVenta>('/api/ventas', ['ventas']);
 
+export function useEditarVenta() {
+  const cache = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...datos }: { id: string } & Record<string, unknown>) =>
+      enviar<RegistroVenta>(`/api/ventas/${id}`, datos, 'PUT'),
+    onSuccess: () => {
+      cache.invalidateQueries({ queryKey: ['ventas'] });
+      cache.invalidateQueries({ queryKey: claves.nomina });
+      cache.invalidateQueries({ queryKey: claves.empleados });
+    },
+  });
+}
+
 export function useCobros(filtros: FiltrosOperacion = {}) {
   return useQuery({
     queryKey: claves.cobros(filtros),
@@ -307,6 +320,19 @@ export function useCobros(filtros: FiltrosOperacion = {}) {
 export const useRegistrarCobro = () =>
   useRegistrarOperacion<RegistroCobro>('/api/cobros', ['cobros']);
 
+export function useEditarCobro() {
+  const cache = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...datos }: { id: string } & Record<string, unknown>) =>
+      enviar<RegistroCobro>(`/api/cobros/${id}`, datos, 'PUT'),
+    onSuccess: () => {
+      cache.invalidateQueries({ queryKey: ['cobros'] });
+      cache.invalidateQueries({ queryKey: claves.nomina });
+      cache.invalidateQueries({ queryKey: claves.empleados });
+    },
+  });
+}
+
 export function useGastos(filtros: FiltrosOperacion = {}) {
   return useQuery({
     queryKey: claves.gastos(filtros),
@@ -316,6 +342,19 @@ export function useGastos(filtros: FiltrosOperacion = {}) {
 
 export const useRegistrarGasto = () =>
   useRegistrarOperacion<GastoEmpleado>('/api/gastos', ['gastos']);
+
+export function useEditarGasto() {
+  const cache = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...datos }: { id: string } & Record<string, unknown>) =>
+      enviar<GastoEmpleado>(`/api/gastos/${id}`, datos, 'PUT'),
+    onSuccess: () => {
+      cache.invalidateQueries({ queryKey: ['gastos'] });
+      cache.invalidateQueries({ queryKey: claves.nomina });
+      cache.invalidateQueries({ queryKey: claves.empleados });
+    },
+  });
+}
 
 export function useBorrarOperacion(tipo: 'ventas' | 'cobros' | 'gastos') {
   const cache = useQueryClient();

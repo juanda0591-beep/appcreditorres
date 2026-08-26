@@ -1,7 +1,7 @@
 import { useState, useRef, type FormEvent } from 'react';
 import { toast } from 'sonner';
-import { formatearPesos, type Municipio } from '@credito/shared';
-import { useRegistrarVenta, useRegistrarCobro, useRegistrarGasto } from '../api/hooks.js';
+import { formatearPesos, type Municipio, type RegistroVenta, type RegistroCobro, type GastoEmpleado } from '@credito/shared';
+import { useRegistrarVenta, useRegistrarCobro, useRegistrarGasto, useEditarVenta, useEditarCobro, useEditarGasto } from '../api/hooks.js';
 import { CampoDinero } from '../componentes/CampoDinero.js';
 import { Aviso, Boton } from '../componentes/base.js';
 import { confirmar } from '../utilidades/alertas.js';
@@ -173,19 +173,31 @@ export function FormularioVenta({
   tarifaLiquidacion,
   empleadoNombre,
   onListo,
+  inicial,
+  onExito,
 }: Comunes & {
-  setMunicipioId: (id: string) => void;
+  setMunicipioId?: (id: string) => void;
   municipios: Municipio[];
-  tarifaVenta: number;
-  tarifaLiquidacion: number;
+  tarifaVenta?: number;
+  tarifaLiquidacion?: number;
   onListo?: (resumen: string) => void;
+  inicial?: RegistroVenta;
+  onExito?: () => void;
 }) {
-  const [cantidad, setCantidad] = useState(0);
-  const [nota, setNota] = useState('');
+  const [cantidad, setCantidad] = useState(inicial?.cantidad ?? 0);
+  const [nota, setNota] = useState(inicial?.nota ?? '');
+  const [municipioIdLocal, setMunicipioIdLocal] = useState(inicial?.municipioId ?? municipioId ?? '');
   const [listo, setListo] = useState('');
   const [gasto, setGasto] = useState<GastoOpcional>(GASTO_VACIO);
   const registrar = useRegistrarVenta();
+  const editar = useEditarVenta();
   const registrarGasto = useRegistrarGasto();
+
+  const modoEdicion = Boolean(inicial);
+  const empleadoIdFinal = inicial?.empleadoId ?? empleadoId;
+  const fechaFinal = inicial?.fecha ?? fecha;
+  const tarifaVentaFinal = inicial?.tarifaVenta ?? tarifaVenta ?? 0;
+  const tarifaLiquidacionFinal = inicial?.tarifaLiquidacion ?? tarifaLiquidacion ?? 0;
 
   /**
    * Recuerda que la venta ya quedo guardada.
@@ -198,8 +210,8 @@ export function FormularioVenta({
 
   // El calculo se muestra en vivo con las mismas tarifas que usara el backend,
   // asi la persona confirma que va a registrar lo correcto antes de guardar.
-  const devengado = cantidad * tarifaVenta;
-  const liquidado = cantidad * tarifaLiquidacion;
+  const devengado = cantidad * tarifaVentaFinal;
+  const liquidado = cantidad * tarifaLiquidacionFinal;
   const ahorro = devengado - liquidado;
 
   async function enviar(evento: FormEvent) {
@@ -208,8 +220,8 @@ export function FormularioVenta({
 
     const filas = [
       { rotulo: 'Empleado', valor: empleadoNombre ?? 'el seleccionado' },
-      { rotulo: 'Fecha', valor: fecha },
-      { rotulo: 'Ventas', valor: `${cantidad} x ${formatearPesos(tarifaVenta)}` },
+      { rotulo: 'Fecha', valor: fechaFinal },
+      { rotulo: 'Ventas', valor: `${cantidad} x ${formatearPesos(tarifaVentaFinal)}` },
       { rotulo: 'Se le paga', valor: formatearPesos(liquidado), destacado: true },
       { rotulo: 'Va al ahorro', valor: formatearPesos(ahorro) },
     ];
@@ -224,27 +236,38 @@ export function FormularioVenta({
     // Si la venta ya paso, no se vuelve a preguntar: lo que falta es el gasto.
     if (!ventaGuardada.current) {
       const seguro = await confirmar({
-        titulo: 'Registrar estas ventas?',
+        titulo: modoEdicion ? 'Actualizar estas ventas?' : 'Registrar estas ventas?',
         resumen: filas,
-        confirmar: 'Registrar ventas',
+        confirmar: modoEdicion ? 'Actualizar ventas' : 'Registrar ventas',
       });
       if (!seguro) return;
 
-      await registrar.mutateAsync({
-        empleadoId,
-        municipioId: municipioId || null,
-        fecha,
-        cantidad,
-        nota: nota || null,
-      });
+      if (modoEdicion) {
+        await editar.mutateAsync({
+          id: inicial!.id,
+          empleadoId: empleadoIdFinal,
+          municipioId: municipioIdLocal || null,
+          fecha: fechaFinal,
+          cantidad,
+          nota: nota || null,
+        });
+      } else {
+        await registrar.mutateAsync({
+          empleadoId: empleadoIdFinal,
+          municipioId: municipioIdLocal || null,
+          fecha: fechaFinal,
+          cantidad,
+          nota: nota || null,
+        });
+      }
       ventaGuardada.current = true;
     }
 
     if (gasto.activo) {
       await registrarGasto.mutateAsync({
-        empleadoId,
-        municipioId: municipioId || null,
-        fecha,
+        empleadoId: empleadoIdFinal,
+        municipioId: municipioIdLocal || null,
+        fecha: fechaFinal,
         monto: gasto.monto,
         concepto: gasto.concepto,
         deducible: gasto.deducible,
@@ -257,19 +280,24 @@ export function FormularioVenta({
       ? `${cantidad} ventas y un gasto de ${formatearPesos(gasto.monto)}`
       : `${cantidad} ventas`;
 
+    if (modoEdicion && onExito) {
+      onExito();
+      return;
+    }
+
     setCantidad(0);
     setNota('');
     setGasto(GASTO_VACIO);
 
-    toast.success(`Se registraron ${resumen}`);
-    if (onListo) onListo(`Se registraron ${resumen}`);
-    else setListo(`Se registraron ${resumen}`);
+    toast.success(`Se ${modoEdicion ? 'actualizaron' : 'registraron'} ${resumen}`);
+    if (onListo) onListo(`Se ${modoEdicion ? 'actualizaron' : 'registraron'} ${resumen}`);
+    else setListo(`Se ${modoEdicion ? 'actualizaron' : 'registraron'} ${resumen}`);
   }
 
   return (
     <form onSubmit={enviar} className="space-y-3">
       {listo && <Listo texto={listo} />}
-      <Aviso error={registrar.error ?? registrarGasto.error} />
+      <Aviso error={registrar.error ?? editar.error ?? registrarGasto.error} />
 
       <div>
         <label className="etiqueta" htmlFor="cantidad">
@@ -286,7 +314,11 @@ export function FormularioVenta({
         />
       </div>
 
-      <SelectorMunicipio valor={municipioId} onCambio={setMunicipioId} municipios={municipios} />
+      <SelectorMunicipio
+        valor={municipioIdLocal}
+        onCambio={setMunicipioId || setMunicipioIdLocal}
+        municipios={municipios}
+      />
 
       <div>
         <label className="etiqueta" htmlFor="nota-venta">
@@ -306,7 +338,7 @@ export function FormularioVenta({
         <div className="space-y-1 rounded-lg bg-slate-50 p-3 text-sm">
           <div className="flex justify-between">
             <span className="text-slate-600">
-              {cantidad} x {formatearPesos(tarifaVenta)}
+              {cantidad} x {formatearPesos(tarifaVentaFinal)}
             </span>
             <span className="font-medium tabular-nums">{formatearPesos(devengado)}</span>
           </div>
@@ -331,14 +363,14 @@ export function FormularioVenta({
         </div>
       )}
 
-      <SeccionGasto gasto={gasto} onCambio={setGasto} idPrefijo="venta" />
+      {!modoEdicion && <SeccionGasto gasto={gasto} onCambio={setGasto} idPrefijo="venta" />}
 
       <Boton
         submit
-        cargando={registrar.isPending || registrarGasto.isPending}
-        deshabilitado={!empleadoId || cantidad <= 0 || gastoIncompleto(gasto)}
+        cargando={registrar.isPending || editar.isPending || registrarGasto.isPending}
+        deshabilitado={!empleadoIdFinal || cantidad <= 0 || gastoIncompleto(gasto)}
       >
-        Registrar ventas
+        {modoEdicion ? 'Actualizar ventas' : 'Registrar ventas'}
       </Boton>
     </form>
   );
@@ -353,21 +385,32 @@ export function FormularioCobro({
   porcentaje,
   empleadoNombre,
   onListo,
+  inicial,
+  onExito,
 }: Comunes & {
-  setMunicipioId: (id: string) => void;
+  setMunicipioId?: (id: string) => void;
   municipios: Municipio[];
-  porcentaje: number;
+  porcentaje?: number;
   onListo?: (resumen: string) => void;
+  inicial?: RegistroCobro;
+  onExito?: () => void;
 }) {
-  const [monto, setMonto] = useState(0);
-  const [nota, setNota] = useState('');
+  const [monto, setMonto] = useState(inicial?.montoRecaudado ?? 0);
+  const [nota, setNota] = useState(inicial?.nota ?? '');
+  const [municipioIdLocal, setMunicipioIdLocal] = useState(inicial?.municipioId ?? municipioId ?? '');
   const [listo, setListo] = useState('');
   const [gasto, setGasto] = useState<GastoOpcional>(GASTO_VACIO);
   const registrar = useRegistrarCobro();
+  const editar = useEditarCobro();
   const registrarGasto = useRegistrarGasto();
 
-  const comision = Math.round((monto * porcentaje) / 100);
-  const municipio = municipios.find((m) => m.id === municipioId);
+  const modoEdicion = Boolean(inicial);
+  const empleadoIdFinal = inicial?.empleadoId ?? empleadoId;
+  const fechaFinal = inicial?.fecha ?? fecha;
+  const porcentajeFinal = inicial?.porcentajeAplicado ?? porcentaje ?? 0;
+
+  const comision = Math.round((monto * porcentajeFinal) / 100);
+  const municipio = municipios.find((m) => m.id === municipioIdLocal);
 
   /** Igual que en las ventas: evita registrar el cobro dos veces al reintentar. */
   const cobroGuardado = useRef(false);
@@ -379,10 +422,10 @@ export function FormularioCobro({
     const filas = [
       { rotulo: 'Empleado', valor: empleadoNombre ?? 'el seleccionado' },
       { rotulo: 'Municipio', valor: municipio?.nombre ?? '' },
-      { rotulo: 'Fecha', valor: fecha },
+      { rotulo: 'Fecha', valor: fechaFinal },
       { rotulo: 'Recaudado', valor: formatearPesos(monto) },
       {
-        rotulo: `Comision (${porcentaje}%)`,
+        rotulo: `Comision (${porcentajeFinal}%)`,
         valor: formatearPesos(comision),
         destacado: true,
       },
@@ -399,27 +442,38 @@ export function FormularioCobro({
       const seguro = await confirmar({
         // El monto recaudado va en el titulo: es la cifra que mas se equivoca al
         // escribir, por la cantidad de ceros.
-        titulo: `Registrar cobro de ${formatearPesos(monto)}?`,
+        titulo: modoEdicion ? `Actualizar cobro de ${formatearPesos(monto)}?` : `Registrar cobro de ${formatearPesos(monto)}?`,
         resumen: filas,
-        confirmar: 'Registrar cobro',
+        confirmar: modoEdicion ? 'Actualizar cobro' : 'Registrar cobro',
       });
       if (!seguro) return;
 
-      await registrar.mutateAsync({
-        empleadoId,
-        municipioId,
-        fecha,
-        montoRecaudado: monto,
-        nota: nota || null,
-      });
+      if (modoEdicion) {
+        await editar.mutateAsync({
+          id: inicial!.id,
+          empleadoId: empleadoIdFinal,
+          municipioId: municipioIdLocal,
+          fecha: fechaFinal,
+          montoRecaudado: monto,
+          nota: nota || null,
+        });
+      } else {
+        await registrar.mutateAsync({
+          empleadoId: empleadoIdFinal,
+          municipioId: municipioIdLocal,
+          fecha: fechaFinal,
+          montoRecaudado: monto,
+          nota: nota || null,
+        });
+      }
       cobroGuardado.current = true;
     }
 
     if (gasto.activo) {
       await registrarGasto.mutateAsync({
-        empleadoId,
-        municipioId: municipioId || null,
-        fecha,
+        empleadoId: empleadoIdFinal,
+        municipioId: municipioIdLocal || null,
+        fecha: fechaFinal,
         monto: gasto.monto,
         concepto: gasto.concepto,
         deducible: gasto.deducible,
@@ -429,8 +483,13 @@ export function FormularioCobro({
     cobroGuardado.current = false;
 
     const resumen = gasto.activo
-      ? `Cobro de ${formatearPesos(monto)} y gasto de ${formatearPesos(gasto.monto)} registrados`
-      : `Cobro de ${formatearPesos(monto)} registrado`;
+      ? `Cobro de ${formatearPesos(monto)} y gasto de ${formatearPesos(gasto.monto)} ${modoEdicion ? 'actualizados' : 'registrados'}`
+      : `Cobro de ${formatearPesos(monto)} ${modoEdicion ? 'actualizado' : 'registrado'}`;
+
+    if (modoEdicion && onExito) {
+      onExito();
+      return;
+    }
 
     setMonto(0);
     setNota('');
@@ -444,19 +503,19 @@ export function FormularioCobro({
   return (
     <form onSubmit={enviar} className="space-y-3">
       {listo && <Listo texto={listo} />}
-      <Aviso error={registrar.error ?? registrarGasto.error} />
+      <Aviso error={registrar.error ?? editar.error ?? registrarGasto.error} />
 
       <CampoDinero
         etiqueta="Cuanto recaudo"
         valor={monto}
         onCambio={setMonto}
         requerido
-        ayuda={`Gana el ${porcentaje}% de lo recaudado`}
+        ayuda={`Gana el ${porcentajeFinal}% de lo recaudado`}
       />
 
       <SelectorMunicipio
-        valor={municipioId}
-        onCambio={setMunicipioId}
+        valor={municipioIdLocal}
+        onCambio={setMunicipioId || setMunicipioIdLocal}
         municipios={municipios}
         requerido
       />
@@ -478,7 +537,7 @@ export function FormularioCobro({
       {monto > 0 && (
         <div className="space-y-1 rounded-lg bg-slate-50 p-3 text-sm">
           <div className="flex justify-between">
-            <span className="text-slate-600">Comision del {porcentaje}%</span>
+            <span className="text-slate-600">Comision del {porcentajeFinal}%</span>
             <span className="font-semibold text-metal-700 tabular-nums">
               {formatearPesos(comision)}
             </span>
@@ -491,20 +550,20 @@ export function FormularioCobro({
               </span>
             </div>
           )}
-          {municipio && (
+          {municipio && !modoEdicion && (
             <MetaMunicipio municipio={municipio} recaudado={monto} />
           )}
         </div>
       )}
 
-      <SeccionGasto gasto={gasto} onCambio={setGasto} idPrefijo="cobro" />
+      {!modoEdicion && <SeccionGasto gasto={gasto} onCambio={setGasto} idPrefijo="cobro" />}
 
       <Boton
         submit
-        cargando={registrar.isPending || registrarGasto.isPending}
-        deshabilitado={!empleadoId || !municipioId || monto <= 0 || gastoIncompleto(gasto)}
+        cargando={registrar.isPending || editar.isPending || registrarGasto.isPending}
+        deshabilitado={!empleadoIdFinal || !municipioIdLocal || monto <= 0 || gastoIncompleto(gasto)}
       >
-        Registrar cobro
+        {modoEdicion ? 'Actualizar cobro' : 'Registrar cobro'}
       </Boton>
     </form>
   );

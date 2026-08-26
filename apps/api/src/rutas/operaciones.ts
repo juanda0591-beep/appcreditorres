@@ -90,6 +90,28 @@ export const rutasVentas: FastifyPluginAsyncZod = async (app) => {
     },
   });
 
+  app.put('/:id', {
+    schema: {
+      params: z.object({ id: zId }),
+      body: zNuevaVenta,
+    },
+    handler: async (peticion) => {
+      const tarifas = await tarifasDe(peticion.body.empleadoId);
+      const [actualizado] = await db
+        .update(registrosVenta)
+        .set({
+          ...peticion.body,
+          tarifaVenta: tarifas.tarifaVenta,
+          tarifaLiquidacion: tarifas.tarifaLiquidacion,
+        })
+        .where(eq(registrosVenta.id, peticion.params.id))
+        .returning();
+
+      if (!actualizado) throw new ErrorNoEncontrado(`No existe la venta ${peticion.params.id}`);
+      return aRegistroVenta(actualizado);
+    },
+  });
+
   app.delete('/:id', {
     schema: { params: z.object({ id: zId }) },
     handler: async (peticion) => {
@@ -139,6 +161,24 @@ export const rutasCobros: FastifyPluginAsyncZod = async (app) => {
     },
   });
 
+  app.put('/:id', {
+    schema: {
+      params: z.object({ id: zId }),
+      body: zNuevoCobro,
+    },
+    handler: async (peticion) => {
+      const tarifas = await tarifasDe(peticion.body.empleadoId);
+      const [actualizado] = await db
+        .update(registrosCobro)
+        .set({ ...peticion.body, porcentajeAplicado: tarifas.porcentajeCobro })
+        .where(eq(registrosCobro.id, peticion.params.id))
+        .returning();
+
+      if (!actualizado) throw new ErrorNoEncontrado(`No existe el cobro ${peticion.params.id}`);
+      return aRegistroCobro(actualizado);
+    },
+  });
+
   app.delete('/:id', {
     schema: { params: z.object({ id: zId }) },
     handler: async (peticion) => {
@@ -180,6 +220,24 @@ export const rutasGastos: FastifyPluginAsyncZod = async (app) => {
       const [creado] = await db.insert(gastosEmpleado).values(peticion.body).returning();
       respuesta.code(201);
       return aGastoEmpleado(creado!);
+    },
+  });
+
+  app.put('/:id', {
+    schema: {
+      params: z.object({ id: zId }),
+      body: zNuevoGasto,
+    },
+    handler: async (peticion) => {
+      await tarifasDe(peticion.body.empleadoId); // valida que exista
+      const [actualizado] = await db
+        .update(gastosEmpleado)
+        .set(peticion.body)
+        .where(eq(gastosEmpleado.id, peticion.params.id))
+        .returning();
+
+      if (!actualizado) throw new ErrorNoEncontrado(`No existe el gasto ${peticion.params.id}`);
+      return aGastoEmpleado(actualizado);
     },
   });
 

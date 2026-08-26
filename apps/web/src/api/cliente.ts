@@ -71,7 +71,7 @@ async function conCuerpo<T>(metodo: string, ruta: string, cuerpo?: unknown): Pro
   );
 }
 
-export const enviar = <T,>(ruta: string, cuerpo?: unknown) => conCuerpo<T>('POST', ruta, cuerpo);
+export const enviar = <T,>(ruta: string, cuerpo?: unknown, metodo: 'POST' | 'PUT' = 'POST') => conCuerpo<T>(metodo, ruta, cuerpo);
 export const parchar = <T,>(ruta: string, cuerpo?: unknown) => conCuerpo<T>('PATCH', ruta, cuerpo);
 export const borrar = <T,>(ruta: string) => conCuerpo<T>('DELETE', ruta);
 
