@@ -5,6 +5,7 @@ import type { Municipio } from '../types/municipio.js';
 import type { RegistroVenta } from '../types/venta.js';
 import type { RegistroCobro } from '../types/cobro.js';
 import type { GastoEmpleado } from '../types/gasto.js';
+import type { DevolucionVenta } from '../types/devolucion.js';
 import type {
   LiquidacionNomina,
   ResumenVentas,
@@ -22,6 +23,7 @@ export interface EntradaLiquidacion {
   ventas: readonly RegistroVenta[];
   cobros: readonly RegistroCobro[];
   gastos: readonly GastoEmpleado[];
+  devoluciones: readonly DevolucionVenta[];
   /** Municipios indexados por id, para resolver metas y porcentajes de bono. */
   municipios: ReadonlyMap<Id, Municipio>;
   /**
@@ -145,7 +147,10 @@ function calcularBonos(
   return { detalles, total };
 }
 
-function resumirDeducciones(gastos: readonly GastoEmpleado[]): ResumenDeducciones {
+function resumirDeducciones(
+  gastos: readonly GastoEmpleado[],
+  devoluciones: readonly DevolucionVenta[],
+): ResumenDeducciones {
   let registros = 0;
   let total = 0;
   let asumidosPorNegocio = 0;
@@ -157,6 +162,12 @@ function resumirDeducciones(gastos: readonly GastoEmpleado[]): ResumenDeduccione
     } else {
       asumidosPorNegocio += gasto.monto;
     }
+  }
+
+  // Las devoluciones siempre se descuentan (son ventas que regresaron)
+  for (const devolucion of devoluciones) {
+    registros += 1;
+    total += devolucion.cantidad * devolucion.tarifaVenta;
   }
 
   return { registros, total, asumidosPorNegocio };
@@ -171,7 +182,7 @@ function resumirDeducciones(gastos: readonly GastoEmpleado[]): ResumenDeduccione
  *
  * Formula:
  *   bruto = (ventas x tarifaLiquidacion) + comision de cobros + bonos
- *   neto  = bruto - gastos deducibles - abono préstamo
+ *   neto  = bruto - gastos deducibles - devoluciones - abono préstamo
  *   ahorro retenido = ventas x (tarifaVenta - tarifaLiquidacion)   [va aparte]
  */
 export function calcularLiquidacion(entrada: EntradaLiquidacion): LiquidacionNomina {
@@ -186,10 +197,11 @@ export function calcularLiquidacion(entrada: EntradaLiquidacion): LiquidacionNom
   const ventasDelPeriodo = enPeriodo(entrada.ventas);
   const cobrosDelPeriodo = enPeriodo(entrada.cobros);
   const gastosDelPeriodo = enPeriodo(entrada.gastos);
+  const devolucionesDelPeriodo = enPeriodo(entrada.devoluciones);
 
   const ventas = resumirVentas(ventasDelPeriodo, advertencias);
   const cobros = resumirCobros(cobrosDelPeriodo);
-  const deducciones = resumirDeducciones(gastosDelPeriodo);
+  const deducciones = resumirDeducciones(gastosDelPeriodo, devolucionesDelPeriodo);
 
   // Las metas de municipio son mensuales: se evaluan sobre los cobros del mes
   // completo, no solo los de esta quincena.

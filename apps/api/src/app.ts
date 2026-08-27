@@ -17,7 +17,7 @@ import { ErrorAplicacion } from './errores.js';
 import { rutasEmpleados } from './rutas/empleados.js';
 import { rutasMunicipios } from './rutas/municipios.js';
 import { rutasZonasVenta } from './rutas/zonas-venta.js';
-import { rutasVentas, rutasCobros, rutasGastos } from './rutas/operaciones.js';
+import { rutasVentas, rutasCobros, rutasGastos, rutasDevoluciones } from './rutas/operaciones.js';
 import { rutasNomina } from './rutas/nomina.js';
 import { rutasCaja } from './rutas/caja.js';
 import { rutasProductos } from './rutas/productos.js';
@@ -184,6 +184,7 @@ export async function construirApp(): Promise<FastifyInstance> {
     await privado.register(rutasVentas, { prefix: '/api/ventas' });
     await privado.register(rutasCobros, { prefix: '/api/cobros' });
     await privado.register(rutasGastos, { prefix: '/api/gastos' });
+    await privado.register(rutasDevoluciones, { prefix: '/api/devoluciones' });
     await privado.register(rutasNomina, { prefix: '/api/nomina' });
     await privado.register(rutasCaja, { prefix: '/api/caja' });
     await privado.register(rutasUsuarios, { prefix: '/api/usuarios' });

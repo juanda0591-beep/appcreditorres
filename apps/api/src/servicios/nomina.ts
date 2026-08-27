@@ -11,10 +11,11 @@ import {
   type RegistroVenta,
   type RegistroCobro,
   type GastoEmpleado,
+  type DevolucionVenta,
 } from '@credito/shared';
 import { db, esquema } from '../db/cliente.js';
 import { leerDetalleBonos } from './comprobante-pdf.js';
-import { aEmpleado, aMunicipio, aRegistroVenta, aRegistroCobro, aGastoEmpleado } from '../db/mapeo.js';
+import { aEmpleado, aMunicipio, aRegistroVenta, aRegistroCobro, aGastoEmpleado, aDevolucionVenta } from '../db/mapeo.js';
 import { obtenerPrestamo } from './prestamos.js';
 import { ErrorNoEncontrado, ErrorDatosInvalidos, ErrorConflicto } from '../errores.js';
 
@@ -24,6 +25,7 @@ const {
   registrosVenta,
   registrosCobro,
   gastosEmpleado,
+  devolucionesVenta,
   liquidaciones,
   movimientosAhorro,
   movimientosCaja,
@@ -73,7 +75,7 @@ export async function previsualizarLiquidacion(
   const enRango = (columna: SQLiteColumn) =>
     and(gte(columna, periodo.desde), lte(columna, periodo.hasta));
 
-  const [ventas, cobros, gastos] = await Promise.all([
+  const [ventas, cobros, gastos, devoluciones] = await Promise.all([
     db
       .select()
       .from(registrosVenta)
@@ -86,6 +88,10 @@ export async function previsualizarLiquidacion(
       .select()
       .from(gastosEmpleado)
       .where(and(eq(gastosEmpleado.empleadoId, empleadoId), enRango(gastosEmpleado.fecha))),
+    db
+      .select()
+      .from(devolucionesVenta)
+      .where(and(eq(devolucionesVenta.empleadoId, empleadoId), enRango(devolucionesVenta.fecha))),
   ]);
 
   // Las metas de municipio son mensuales: hay que traer los cobros del mes
@@ -111,6 +117,7 @@ export async function previsualizarLiquidacion(
     ventas: ventas.map(aRegistroVenta),
     cobros: cobros.map(aRegistroCobro),
     gastos: gastos.map(aGastoEmpleado),
+    devoluciones: devoluciones.map(aDevolucionVenta),
     cobrosDelMes: cobrosDelMes.map(aRegistroCobro),
     periodoBonos: mes,
     municipios: await cargarMunicipios(),
@@ -140,11 +147,12 @@ export async function generarReporte(periodo: Periodo): Promise<ReporteNomina> {
   const enRango = (columna: SQLiteColumn) =>
     and(gte(columna, periodo.desde), lte(columna, periodo.hasta));
 
-  const [filasEmpleados, ventas, cobros, gastos, mapaMunicipios] = await Promise.all([
+  const [filasEmpleados, ventas, cobros, gastos, devoluciones, mapaMunicipios] = await Promise.all([
     db.select().from(empleados).where(eq(empleados.activo, true)).orderBy(empleados.nombre),
     db.select().from(registrosVenta).where(enRango(registrosVenta.fecha)),
     db.select().from(registrosCobro).where(enRango(registrosCobro.fecha)),
     db.select().from(gastosEmpleado).where(enRango(gastosEmpleado.fecha)),
+    db.select().from(devolucionesVenta).where(enRango(devolucionesVenta.fecha)),
     cargarMunicipios(),
   ]);
 
@@ -172,11 +180,20 @@ export async function generarReporte(periodo: Periodo): Promise<ReporteNomina> {
     gastosPorEmpleado.set(registro.empleadoId, lista);
   }
 
+  const devolucionesPorEmpleado = new Map<string, DevolucionVenta[]>();
+  for (const fila of devoluciones) {
+    const registro = aDevolucionVenta(fila);
+    const lista = devolucionesPorEmpleado.get(registro.empleadoId) ?? [];
+    lista.push(registro);
+    devolucionesPorEmpleado.set(registro.empleadoId, lista);
+  }
+
   const conMovimientos = filasEmpleados.filter(
     (fila) =>
       ventasPorEmpleado.has(fila.id) ||
       cobrosPorEmpleado.has(fila.id) ||
-      gastosPorEmpleado.has(fila.id),
+      gastosPorEmpleado.has(fila.id) ||
+      devolucionesPorEmpleado.has(fila.id),
   );
 
   const reporteEmpleados = conMovimientos.map((fila) =>
@@ -186,6 +203,7 @@ export async function generarReporte(periodo: Periodo): Promise<ReporteNomina> {
       ventas: ventasPorEmpleado.get(fila.id) ?? [],
       cobros: cobrosPorEmpleado.get(fila.id) ?? [],
       gastos: gastosPorEmpleado.get(fila.id) ?? [],
+      devoluciones: devolucionesPorEmpleado.get(fila.id) ?? [],
       municipios: mapaMunicipios,
       // Bonos y prestamo son de una liquidacion real, no de un reporte sobre
       // un rango cualquiera: se evaluan mensualmente o al momento de pagar.
@@ -246,7 +264,7 @@ export async function confirmarLiquidacion(
   const enRango = (columna: SQLiteColumn) =>
     and(gte(columna, periodo.desde), lte(columna, periodo.hasta));
 
-  const [ventas, cobros, gastos] = await Promise.all([
+  const [ventas, cobros, gastos, devoluciones] = await Promise.all([
     db
       .select()
       .from(registrosVenta)
@@ -259,6 +277,10 @@ export async function confirmarLiquidacion(
       .select()
       .from(gastosEmpleado)
       .where(and(eq(gastosEmpleado.empleadoId, empleadoId), enRango(gastosEmpleado.fecha))),
+    db
+      .select()
+      .from(devolucionesVenta)
+      .where(and(eq(devolucionesVenta.empleadoId, empleadoId), enRango(devolucionesVenta.fecha))),
   ]);
 
   const mes = periodoDelMes(periodo.hasta);
@@ -280,6 +302,7 @@ export async function confirmarLiquidacion(
     ventas: ventas.map(aRegistroVenta),
     cobros: cobros.map(aRegistroCobro),
     gastos: gastos.map(aGastoEmpleado),
+    devoluciones: devoluciones.map(aDevolucionVenta),
     cobrosDelMes: cobrosDelMes.map(aRegistroCobro),
     periodoBonos: mes,
     municipios: await cargarMunicipios(),

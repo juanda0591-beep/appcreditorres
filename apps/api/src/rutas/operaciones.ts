@@ -3,11 +3,11 @@ import { and, eq, gte, lte, desc } from 'drizzle-orm';
 import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
 import { z } from 'zod';
 import { db, esquema } from '../db/cliente.js';
-import { aRegistroVenta, aRegistroCobro, aGastoEmpleado } from '../db/mapeo.js';
+import { aRegistroVenta, aRegistroCobro, aGastoEmpleado, aDevolucionVenta } from '../db/mapeo.js';
 import { ErrorNoEncontrado } from '../errores.js';
-import { zNuevaVenta, zNuevoCobro, zNuevoGasto, zFecha, zId } from './validacion.js';
+import { zNuevaVenta, zNuevoCobro, zNuevoGasto, zNuevaDevolucion, zFecha, zId } from './validacion.js';
 
-const { empleados, registrosVenta, registrosCobro, gastosEmpleado } = esquema;
+const { empleados, registrosVenta, registrosCobro, gastosEmpleado, devolucionesVenta } = esquema;
 
 /** Filtros comunes de los listados de operaciones. */
 const zFiltros = z.object({
@@ -250,6 +250,78 @@ export const rutasGastos: FastifyPluginAsyncZod = async (app) => {
         .returning({ id: gastosEmpleado.id });
 
       if (!borrado) throw new ErrorNoEncontrado(`No existe el gasto ${peticion.params.id}`);
+      return { borrado: true, id: borrado.id };
+    },
+  });
+};
+
+export const rutasDevoluciones: FastifyPluginAsyncZod = async (app) => {
+  app.get('/', {
+    schema: { querystring: zFiltros },
+    handler: async (peticion) => {
+      const filas = await db
+        .select()
+        .from(devolucionesVenta)
+        .where(
+          condiciones(
+            peticion.query,
+            devolucionesVenta.empleadoId,
+            devolucionesVenta.fecha,
+            devolucionesVenta.municipioId,
+          ),
+        )
+        .orderBy(desc(devolucionesVenta.fecha));
+      return filas.map(aDevolucionVenta);
+    },
+  });
+
+  app.post('/', {
+    schema: { body: zNuevaDevolucion },
+    handler: async (peticion, respuesta) => {
+      const tarifas = await tarifasDe(peticion.body.empleadoId);
+      const [creado] = await db
+        .insert(devolucionesVenta)
+        .values({
+          ...peticion.body,
+          tarifaVenta: tarifas.tarifaVenta,
+        })
+        .returning();
+
+      respuesta.code(201);
+      return aDevolucionVenta(creado!);
+    },
+  });
+
+  app.put('/:id', {
+    schema: {
+      params: z.object({ id: zId }),
+      body: zNuevaDevolucion,
+    },
+    handler: async (peticion) => {
+      const tarifas = await tarifasDe(peticion.body.empleadoId);
+      const [actualizado] = await db
+        .update(devolucionesVenta)
+        .set({
+          ...peticion.body,
+          tarifaVenta: tarifas.tarifaVenta,
+        })
+        .where(eq(devolucionesVenta.id, peticion.params.id))
+        .returning();
+
+      if (!actualizado) throw new ErrorNoEncontrado(`No existe la devolucion ${peticion.params.id}`);
+      return aDevolucionVenta(actualizado);
+    },
+  });
+
+  app.delete('/:id', {
+    schema: { params: z.object({ id: zId }) },
+    handler: async (peticion) => {
+      const [borrado] = await db
+        .delete(devolucionesVenta)
+        .where(eq(devolucionesVenta.id, peticion.params.id))
+        .returning({ id: devolucionesVenta.id });
+
+      if (!borrado) throw new ErrorNoEncontrado(`No existe la devolucion ${peticion.params.id}`);
       return { borrado: true, id: borrado.id };
     },
   });

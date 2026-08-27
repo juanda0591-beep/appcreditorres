@@ -9,6 +9,7 @@ export * from './types/municipio.js';
 export * from './types/venta.js';
 export * from './types/cobro.js';
 export * from './types/gasto.js';
+export * from './types/devolucion.js';
 export * from './types/nomina.js';
 export * from './types/prestamo.js';
 export * from './types/ahorro.js';

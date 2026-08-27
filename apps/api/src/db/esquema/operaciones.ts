@@ -98,3 +98,37 @@ export const gastosEmpleado = sqliteTable(
 
 export type GastoEmpleadoFila = typeof gastosEmpleado.$inferSelect;
 export type GastoEmpleadoInsert = typeof gastosEmpleado.$inferInsert;
+
+/**
+ * Devoluciones de ventas: productos que regresaron y se descuentan de la
+ * liquidación del empleado. Afecta el pago igual que un gasto deducible.
+ */
+export const devolucionesVenta = sqliteTable(
+  'devoluciones_venta',
+  {
+    id: text('id').primaryKey().$defaultFn(idPorDefecto),
+    empleadoId: text('empleado_id')
+      .notNull()
+      .references(() => empleados.id, { onDelete: 'restrict' }),
+    municipioId: text('municipio_id').references(() => municipios.id, {
+      onDelete: 'set null',
+    }),
+    fecha: text('fecha').notNull(),
+
+    /** Número de ventas devueltas. */
+    cantidad: integer('cantidad').notNull(),
+
+    /** Tarifa vigente al registrar la devolución. Copia de Empleado.tarifaVenta. */
+    tarifaVenta: integer('tarifa_venta').notNull(),
+
+    motivo: text('motivo'),
+    creadoEn: text('creado_en').notNull().$defaultFn(ahora),
+  },
+  (tabla) => [
+    index('idx_devoluciones_empleado_fecha').on(tabla.empleadoId, tabla.fecha),
+    index('idx_devoluciones_fecha').on(tabla.fecha),
+  ],
+);
+
+export type DevolucionVentaFila = typeof devolucionesVenta.$inferSelect;
+export type DevolucionVentaInsert = typeof devolucionesVenta.$inferInsert;

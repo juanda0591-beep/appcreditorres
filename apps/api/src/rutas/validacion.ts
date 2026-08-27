@@ -117,6 +117,17 @@ export const zNuevoGasto = z.object({
   deducible: z.boolean().optional(),
 });
 
+export const zNuevaDevolucion = z.object({
+  empleadoId: zId,
+  municipioId: zId.nullish(),
+  fecha: zFecha,
+  cantidad: z
+    .number()
+    .int('La cantidad de devoluciones debe ser un numero entero')
+    .positive('La cantidad debe ser mayor a cero'),
+  motivo: z.string().trim().max(500).nullish(),
+});
+
 export const zNuevoMovimientoCaja = z.object({
   fecha: zFecha,
   tipo: z.enum(['ingreso', 'egreso']),

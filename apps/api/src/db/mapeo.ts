@@ -11,6 +11,7 @@ import type {
   RegistroVenta,
   RegistroCobro,
   GastoEmpleado,
+  DevolucionVenta,
   Prestamo,
   MovimientoPrestamo,
   Producto,
@@ -23,6 +24,7 @@ import type {
   RegistroVentaFila,
   RegistroCobroFila,
   GastoEmpleadoFila,
+  DevolucionVentaFila,
   PrestamoEmpleadoFila,
   MovimientoPrestamoFila,
   ProductoFila,
@@ -101,6 +103,19 @@ export function aGastoEmpleado(fila: GastoEmpleadoFila): GastoEmpleado {
     monto: fila.monto,
     concepto: fila.concepto,
     deducible: fila.deducible,
+    creadoEn: fila.creadoEn,
+  };
+}
+
+export function aDevolucionVenta(fila: DevolucionVentaFila): DevolucionVenta {
+  return {
+    id: fila.id,
+    empleadoId: fila.empleadoId,
+    municipioId: fila.municipioId,
+    fecha: fila.fecha,
+    cantidad: fila.cantidad,
+    tarifaVenta: fila.tarifaVenta,
+    motivo: fila.motivo,
     creadoEn: fila.creadoEn,
   };
 }
