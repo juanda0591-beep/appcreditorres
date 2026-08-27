@@ -1,7 +1,7 @@
 import { useState, useRef, type FormEvent } from 'react';
 import { toast } from 'sonner';
-import { formatearPesos, type Municipio, type RegistroVenta, type RegistroCobro, type GastoEmpleado } from '@credito/shared';
-import { useRegistrarVenta, useRegistrarCobro, useRegistrarGasto, useEditarVenta, useEditarCobro, useEditarGasto } from '../api/hooks.js';
+import { formatearPesos, type Municipio, type RegistroVenta, type RegistroCobro, type GastoEmpleado, type DevolucionVenta } from '@credito/shared';
+import { useRegistrarVenta, useRegistrarCobro, useRegistrarGasto, useEditarVenta, useEditarCobro, useEditarGasto, useRegistrarDevolucion, useEditarDevolucion } from '../api/hooks.js';
 import { CampoDinero } from '../componentes/CampoDinero.js';
 import { Aviso, Boton } from '../componentes/base.js';
 import { confirmar } from '../utilidades/alertas.js';
@@ -732,3 +732,139 @@ export function FormularioGasto({
     </form>
   );
 }
+
+/**
+ * Devolucion de ventas.
+ *
+ * Registra productos que fueron vendidos y regresaron. Se descuentan de la
+ * liquidacion del empleado porque las ventas se pagan al momento de registrarse
+ * pero la devolucion ocurre despues.
+ */
+export function FormularioDevolucion({
+  empleadoId,
+  municipioId,
+  fecha,
+  empleadoNombre,
+  onListo,
+  inicial,
+  onExito,
+}: Comunes & {
+  onListo?: (resumen: string) => void;
+  inicial?: DevolucionVenta;
+  onExito?: () => void;
+}) {
+  const [cantidad, setCantidad] = useState(inicial?.cantidad ?? 0);
+  const [motivo, setMotivo] = useState(inicial?.motivo ?? '');
+  const [listo, setListo] = useState('');
+  const registrar = useRegistrarDevolucion();
+  const editar = useEditarDevolucion();
+
+  const modoEdicion = Boolean(inicial);
+  const empleadoIdFinal = inicial?.empleadoId ?? empleadoId;
+  const fechaFinal = inicial?.fecha ?? fecha;
+  const municipioIdFinal = inicial?.municipioId ?? municipioId;
+  const tarifaVenta = inicial?.tarifaVenta ?? 0;
+  const montoTotal = cantidad * tarifaVenta;
+
+  async function enviar(evento: FormEvent) {
+    evento.preventDefault();
+    setListo('');
+
+    const seguro = await confirmar({
+      titulo: modoEdicion
+        ? `Actualizar devolucion de ${cantidad} ${cantidad === 1 ? 'venta' : 'ventas'}?`
+        : `Registrar devolucion de ${cantidad} ${cantidad === 1 ? 'venta' : 'ventas'}?`,
+      resumen: [
+        { rotulo: 'Empleado', valor: empleadoNombre ?? 'el seleccionado' },
+        { rotulo: 'Fecha', valor: fechaFinal },
+        { rotulo: 'Cantidad devuelta', valor: `${cantidad}` },
+        ...(modoEdicion ? [{ rotulo: 'Monto', valor: `-${formatearPesos(montoTotal)}`, destacado: true }] : []),
+        ...(motivo ? [{ rotulo: 'Motivo', valor: motivo }] : []),
+      ],
+      confirmar: modoEdicion ? 'Actualizar devolucion' : 'Registrar devolucion',
+    });
+    if (!seguro) return;
+
+    if (modoEdicion) {
+      await editar.mutateAsync({
+        id: inicial!.id,
+        empleadoId: empleadoIdFinal,
+        municipioId: municipioIdFinal || null,
+        fecha: fechaFinal,
+        cantidad,
+        motivo: motivo || null,
+      });
+    } else {
+      await registrar.mutateAsync({
+        empleadoId: empleadoIdFinal,
+        municipioId: municipioIdFinal || null,
+        fecha: fechaFinal,
+        cantidad,
+        motivo: motivo || null,
+      });
+    }
+
+    if (modoEdicion && onExito) {
+      onExito();
+      return;
+    }
+
+    setCantidad(0);
+    setMotivo('');
+    const resumen = `Devolucion de ${cantidad} ${cantidad === 1 ? 'venta' : 'ventas'} ${modoEdicion ? 'actualizada' : 'registrada'}`;
+    toast.success(resumen);
+    if (onListo) onListo(resumen);
+    setListo(resumen);
+  }
+
+  return (
+    <form className="espacio-y-4" onSubmit={enviar}>
+      {listo && (
+        <div className="rounded-lg border border-metal-200 bg-metal-50 p-3 text-sm font-medium text-metal-800">
+          {listo}
+        </div>
+      )}
+
+      <div>
+        <label className="etiqueta" htmlFor="cantidad-devolucion">
+          Cantidad de ventas devueltas <span className="text-red-600">*</span>
+        </label>
+        <input
+          id="cantidad-devolucion"
+          type="number"
+          min="1"
+          className="campo"
+          value={cantidad || ''}
+          onChange={(e) => setCantidad(Number.parseInt(e.target.value) || 0)}
+          placeholder="Cuantas ventas se devolvieron"
+        />
+        <p className="mt-1 text-xs text-slate-500">
+          Se descontara de la liquidacion del empleado
+        </p>
+      </div>
+
+      <div>
+        <label className="etiqueta" htmlFor="motivo-devolucion">
+          Motivo (opcional)
+        </label>
+        <textarea
+          id="motivo-devolucion"
+          className="campo min-h-20"
+          value={motivo}
+          onChange={(e) => setMotivo(e.target.value)}
+          placeholder="Por que se devolvieron las ventas..."
+          maxLength={500}
+        />
+      </div>
+
+      <Boton
+        submit
+        cargando={registrar.isPending || editar.isPending}
+        deshabilitado={!empleadoIdFinal || cantidad <= 0}
+      >
+        {modoEdicion ? 'Actualizar devolucion' : 'Registrar devolucion'}
+      </Boton>
+    </form>
+  );
+}
+

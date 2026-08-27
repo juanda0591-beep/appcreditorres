@@ -1,21 +1,22 @@
 import { useState } from 'react';
-import { ShoppingCart, HandCoins, Receipt } from 'lucide-react';
+import { ShoppingCart, HandCoins, Receipt, Undo2 } from 'lucide-react';
 import { useEmpleados, useMunicipios } from '../api/hooks.js';
 import { Cargando, Modal } from '../componentes/base.js';
 import { Pestanas } from '../componentes/Pestanas.js';
-import { HistorialVentas, HistorialCobros, HistorialGastos } from '../componentes/HistorialOperaciones.js';
+import { HistorialVentas, HistorialCobros, HistorialGastos, HistorialDevoluciones } from '../componentes/HistorialOperaciones.js';
 import { hoy } from '../utilidades/fechas.js';
-import { FormularioVenta, FormularioCobro, FormularioGasto } from './formularios.js';
+import { FormularioVenta, FormularioCobro, FormularioGasto, FormularioDevolucion } from './formularios.js';
 
-type Formulario = 'venta' | 'cobro' | 'gasto';
+type Formulario = 'venta' | 'cobro' | 'gasto' | 'devolucion';
 
 const TITULOS: Record<Formulario, string> = {
   venta: 'Registrar ventas',
   cobro: 'Registrar cobro',
   gasto: 'Registrar gasto',
+  devolucion: 'Registrar devolucion',
 };
 
-type Vista = 'registrar' | 'ventas' | 'cobros' | 'gastos';
+type Vista = 'registrar' | 'ventas' | 'cobros' | 'gastos' | 'devoluciones';
 
 /** Pantalla del dia a dia: registrar operaciones y revisar su historial. */
 export function RegistroDiario() {
@@ -31,6 +32,7 @@ export function RegistroDiario() {
           ['ventas', 'Historial de ventas'],
           ['cobros', 'Historial de cobros'],
           ['gastos', 'Historial de gastos'],
+          ['devoluciones', 'Historial de devoluciones'],
         ]}
       />
 
@@ -38,6 +40,7 @@ export function RegistroDiario() {
       {vista === 'ventas' && <HistorialVentas />}
       {vista === 'cobros' && <HistorialCobros />}
       {vista === 'gastos' && <HistorialGastos />}
+      {vista === 'devoluciones' && <HistorialDevoluciones />}
     </div>
   );
 }
@@ -136,7 +139,7 @@ function Registrar() {
         Los botones se deshabilitan sin empleado en vez de esconderse: asi se ve
         que existen y queda claro que falta elegir a quien.
       */}
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-4">
         <BotonRegistro
           icono={ShoppingCart}
           texto="Ventas"
@@ -156,6 +159,13 @@ function Registrar() {
           texto="Solo gasto"
           ayuda="Sin venta ni cobro"
           onClick={() => setAbierto('gasto')}
+          deshabilitado={!empleadoId}
+        />
+        <BotonRegistro
+          icono={Undo2}
+          texto="Devolucion"
+          ayuda="Ventas devueltas"
+          onClick={() => setAbierto('devolucion')}
           deshabilitado={!empleadoId}
         />
       </div>
@@ -201,6 +211,16 @@ function Registrar() {
 
           {abierto === 'gasto' && (
             <FormularioGasto
+              empleadoId={empleadoId}
+              municipioId={municipioId}
+              fecha={fecha}
+              empleadoNombre={empleado?.nombre}
+              onListo={cerrar}
+            />
+          )}
+
+          {abierto === 'devolucion' && (
+            <FormularioDevolucion
               empleadoId={empleadoId}
               municipioId={municipioId}
               fecha={fecha}

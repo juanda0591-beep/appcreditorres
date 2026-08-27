@@ -5,6 +5,7 @@ import type {
   RegistroVenta,
   RegistroCobro,
   GastoEmpleado,
+  DevolucionVenta,
   LiquidacionNomina,
   ReporteNomina,
   MovimientoCaja,
@@ -38,6 +39,7 @@ export const claves = {
   ventas: (filtros?: unknown) => ['ventas', filtros] as const,
   cobros: (filtros?: unknown) => ['cobros', filtros] as const,
   gastos: (filtros?: unknown) => ['gastos', filtros] as const,
+  devoluciones: (filtros?: unknown) => ['devoluciones', filtros] as const,
   nomina: ['nomina'] as const,
   liquidacion: (id: string, periodo: Periodo) => ['nomina', 'previa', id, periodo] as const,
   reporteNomina: (periodo: Periodo) => ['nomina', 'reporte', periodo] as const,
@@ -356,13 +358,43 @@ export function useEditarGasto() {
   });
 }
 
-export function useBorrarOperacion(tipo: 'ventas' | 'cobros' | 'gastos') {
+export function useBorrarOperacion(tipo: 'ventas' | 'cobros' | 'gastos' | 'devoluciones') {
   const cache = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => borrar<{ borrado: boolean }>(`/api/${tipo}/${id}`),
     onSuccess: () => {
       cache.invalidateQueries({ queryKey: [tipo] });
       cache.invalidateQueries({ queryKey: claves.nomina });
+    },
+  });
+}
+
+// ---------- Devoluciones ----------
+
+export function useDevoluciones(filtros: {
+  empleadoId?: string;
+  municipioId?: string;
+  desde?: string;
+  hasta?: string;
+}) {
+  return useQuery({
+    queryKey: claves.devoluciones(filtros),
+    queryFn: () => obtener<DevolucionVenta[]>(`/api/devoluciones${parametros(filtros)}`),
+  });
+}
+
+export const useRegistrarDevolucion = () =>
+  useRegistrarOperacion<DevolucionVenta>('/api/devoluciones', ['devoluciones']);
+
+export function useEditarDevolucion() {
+  const cache = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...datos }: { id: string } & Record<string, unknown>) =>
+      enviar<DevolucionVenta>(`/api/devoluciones/${id}`, datos, 'PUT'),
+    onSuccess: () => {
+      cache.invalidateQueries({ queryKey: ['devoluciones'] });
+      cache.invalidateQueries({ queryKey: claves.nomina });
+      cache.invalidateQueries({ queryKey: claves.empleados });
     },
   });
 }

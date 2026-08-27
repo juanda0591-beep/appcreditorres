@@ -12,7 +12,7 @@ export function Dinero({
 }: {
   valor: number;
   tipo?: 'ingreso' | 'egreso' | 'neutro';
-  tamano?: 'normal' | 'grande';
+  tamano?: 'normal' | 'grande' | '2xl';
 }) {
   const color =
     tipo === 'ingreso'
@@ -23,7 +23,7 @@ export function Dinero({
           ? 'text-red-600'
           : 'text-slate-900';
 
-  const tamanos = tamano === 'grande' ? 'text-2xl font-semibold' : 'font-medium';
+  const tamanos = tamano === 'grande' ? 'text-2xl font-semibold' : tamano === '2xl' ? 'text-2xl font-bold' : 'font-medium';
 
   return <span className={`tabular-nums ${color} ${tamanos}`}>{formatearPesos(valor)}</span>;
 }

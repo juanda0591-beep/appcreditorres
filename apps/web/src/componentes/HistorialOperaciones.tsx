@@ -5,15 +5,17 @@ import {
   devengadoDeVenta,
   ahorroDeVenta,
   comisionDeCobro,
+  montoDevolucion,
   type RegistroVenta,
   type RegistroCobro,
   type GastoEmpleado,
+  type DevolucionVenta,
 } from '@credito/shared';
-import { useEmpleados, useMunicipios, useVentas, useCobros, useGastos, useBorrarOperacion } from '../api/hooks.js';
+import { useEmpleados, useMunicipios, useVentas, useCobros, useGastos, useDevoluciones, useBorrarOperacion } from '../api/hooks.js';
 import { Cargando, Vacio, Aviso, Dinero, Modal } from './base.js';
 import { fechaCorta } from '../utilidades/fechas.js';
-import { FormularioVenta, FormularioCobro, FormularioGasto } from '../paginas/formularios.js';
-import { confirmar } from '../utilidades/alertas.js';
+import { FormularioVenta, FormularioCobro, FormularioGasto, FormularioDevolucion } from '../paginas/formularios.js';
+import { confirmar, confirmarPeligro } from '../utilidades/alertas.js';
 import { toast } from 'sonner';
 
 const SIN_MUNICIPIO = 'sin-municipio';
@@ -704,3 +706,191 @@ function TablaGastos({
     </div>
   );
 }
+
+export function HistorialDevoluciones() {
+  const [empleadoId, setEmpleadoId] = useState('');
+  const [municipioId, setMunicipioId] = useState('');
+  const [desde, setDesde] = useState('');
+  const [hasta, setHasta] = useState('');
+  const [devolucionEditar, setDevolucionEditar] = useState<DevolucionVenta | null>(null);
+
+  const empleados = useEmpleados();
+  const municipios = useMunicipios();
+  const devoluciones = useDevoluciones({
+    empleadoId: empleadoId || undefined,
+    municipioId: municipioId || undefined,
+    desde: desde || undefined,
+    hasta: hasta || undefined,
+  });
+  const borrarDevolucion = useBorrarOperacion('devoluciones');
+
+  const totalCantidad = useMemo(
+    () => devoluciones.data?.reduce((suma, d) => suma + d.cantidad, 0) ?? 0,
+    [devoluciones.data],
+  );
+
+  const totalMonto = useMemo(
+    () => devoluciones.data?.reduce((suma, d) => suma + montoDevolucion(d), 0) ?? 0,
+    [devoluciones.data],
+  );
+
+  const nombreEmpleado = (id: string) =>
+    empleados.data?.find((e) => e.id === id)?.nombre ?? 'Desconocido';
+
+  async function manejarBorrar(devolucion: DevolucionVenta) {
+    const seguro = await confirmarPeligro({
+      titulo: `Borrar devolucion de ${devolucion.cantidad} ${devolucion.cantidad === 1 ? 'venta' : 'ventas'}?`,
+      detalle: `Del empleado ${nombreEmpleado(devolucion.empleadoId)} el ${fechaCorta(devolucion.fecha)}. Esta accion no se puede deshacer.`,
+      confirmar: 'Borrar devolucion',
+    });
+
+    if (seguro) {
+      await borrarDevolucion.mutateAsync(devolucion.id);
+      toast.success('Devolucion borrada');
+    }
+  }
+
+  return (
+    <div className="espacio-y-4">
+      <FiltrosHistorial
+        empleadoId={empleadoId}
+        setEmpleadoId={setEmpleadoId}
+        municipioId={municipioId}
+        setMunicipioId={setMunicipioId}
+        desde={desde}
+        setDesde={setDesde}
+        hasta={hasta}
+        setHasta={setHasta}
+      />
+
+      {devoluciones.isLoading && <Cargando />}
+
+      {devoluciones.error && (
+        <Aviso error={devoluciones.error} />
+      )}
+
+      {devoluciones.data && devoluciones.data.length === 0 && (
+        <Vacio>No hay devoluciones en este periodo</Vacio>
+      )}
+
+      {devoluciones.data && devoluciones.data.length > 0 && (
+        <>
+          <div className="rounded-xl bg-slate-50 p-4 border border-slate-200">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-slate-600">Total devoluciones</p>
+                <p className="text-2xl font-bold text-slate-900 tabular-nums">
+                  {totalCantidad} {totalCantidad === 1 ? 'venta' : 'ventas'}
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-sm text-slate-600">Monto total descontado</p>
+                <Dinero valor={totalMonto} tamano="2xl" />
+              </div>
+            </div>
+          </div>
+
+          <TablaDevoluciones
+            devoluciones={devoluciones.data}
+            municipios={municipios.data ?? []}
+            nombreEmpleado={nombreEmpleado}
+            onEditar={setDevolucionEditar}
+            onBorrar={manejarBorrar}
+          />
+        </>
+      )}
+
+      {devolucionEditar && (
+        <Modal
+          titulo="Editar devolucion"
+          onCerrar={() => setDevolucionEditar(null)}
+          ancho="amplio"
+        >
+          <FormularioDevolucion
+            inicial={devolucionEditar}
+            empleadoId={devolucionEditar.empleadoId}
+            municipioId={devolucionEditar.municipioId ?? ''}
+            fecha={devolucionEditar.fecha}
+            empleadoNombre={nombreEmpleado(devolucionEditar.empleadoId)}
+            onExito={() => {
+              setDevolucionEditar(null);
+              toast.success('Devolucion actualizada');
+            }}
+          />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function TablaDevoluciones({
+  devoluciones,
+  municipios,
+  nombreEmpleado,
+  onEditar,
+  onBorrar,
+}: {
+  devoluciones: DevolucionVenta[];
+  municipios: Array<{ id: string; nombre: string }>;
+  nombreEmpleado: (id: string) => string;
+  onEditar: (devolucion: DevolucionVenta) => void;
+  onBorrar: (devolucion: DevolucionVenta) => void;
+}) {
+  return (
+    <div className="overflow-x-auto rounded-xl border border-slate-200">
+      <table className="w-full min-w-lg border-collapse text-sm">
+        <thead>
+          <tr className="bg-slate-50 text-left text-xs font-semibold tracking-wide text-slate-500 uppercase">
+            <th scope="col" className="px-3 py-2">Fecha</th>
+            <th scope="col" className="px-3 py-2">Empleado</th>
+            <th scope="col" className="px-3 py-2">Municipio</th>
+            <th scope="col" className="px-3 py-2 text-right">Cantidad</th>
+            <th scope="col" className="px-3 py-2 text-right">Monto</th>
+            <th scope="col" className="px-3 py-2">Motivo</th>
+            <th scope="col" className="px-3 py-2 text-center">Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {devoluciones.map((devolucion, indice) => (
+            <tr
+              key={devolucion.id}
+              className={`border-t border-slate-100 ${indice % 2 === 1 ? 'bg-slate-50/60' : ''}`}
+            >
+              <td className="px-3 py-2 text-slate-600">{fechaCorta(devolucion.fecha)}</td>
+              <td className="px-3 py-2 font-medium text-slate-900">{nombreEmpleado(devolucion.empleadoId)}</td>
+              <td className="px-3 py-2 text-slate-600">{nombreMunicipio(devolucion.municipioId, municipios)}</td>
+              <td className="px-3 py-2 text-right font-semibold tabular-nums text-slate-900">
+                {devolucion.cantidad}
+              </td>
+              <td className="px-3 py-2 text-right font-semibold tabular-nums text-red-600">
+                -{formatearPesos(montoDevolucion(devolucion))}
+              </td>
+              <td className="px-3 py-2 text-slate-700">
+                {devolucion.motivo || <span className="text-slate-400 italic">Sin motivo</span>}
+              </td>
+              <td className="px-3 py-2">
+                <div className="flex items-center justify-center gap-2">
+                  <button
+                    onClick={() => onEditar(devolucion)}
+                    className="p-1.5 rounded-lg text-slate-600 hover:bg-blue-50 hover:text-blue-600 transition-colors"
+                    title="Editar devolucion"
+                  >
+                    <Pencil size={16} />
+                  </button>
+                  <button
+                    onClick={() => onBorrar(devolucion)}
+                    className="p-1.5 rounded-lg text-slate-600 hover:bg-red-50 hover:text-red-600 transition-colors"
+                    title="Borrar devolucion"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
