@@ -78,9 +78,33 @@ export const rutasCrm: FastifyPluginAsync = async (fastify) => {
       .from(carteraClientes)
       .where(where);
 
-    // Obtener registros paginados
+    // Obtener registros paginados con última gestión
     const cartera = await db
-      .select()
+      .select({
+        id: carteraClientes.id,
+        numero: carteraClientes.numero,
+        vendedor: carteraClientes.vendedor,
+        cliente: carteraClientes.cliente,
+        cedula: carteraClientes.cedula,
+        telefono: carteraClientes.telefono,
+        municipio: carteraClientes.municipio,
+        articulo: carteraClientes.articulo,
+        fechaInicio: carteraClientes.fechaInicio,
+        montoCuota: carteraClientes.montoCuota,
+        periodosPago: carteraClientes.periodosPago,
+        abono: carteraClientes.abono,
+        saldo: carteraClientes.saldo,
+        ultimaFechaAbono: carteraClientes.ultimaFechaAbono,
+        estado: carteraClientes.estado,
+        diasMora: carteraClientes.diasMora,
+        ultimaGestion: sql<string | null>`(
+          SELECT fecha_gestion
+          FROM gestiones_cobro
+          WHERE cartera_cliente_id = ${carteraClientes.id}
+          ORDER BY fecha_gestion DESC
+          LIMIT 1
+        )`,
+      })
       .from(carteraClientes)
       .where(where)
       .orderBy(desc(carteraClientes.diasMora), desc(carteraClientes.saldo))
@@ -190,13 +214,26 @@ export const rutasCrm: FastifyPluginAsync = async (fastify) => {
           const municipio = row['Municipio'] || row['MUNICIPIO'] || null;
           const articulo = String(row['Artículo'] || row['ARTICULO'] || row['Articulo'] || '').trim();
 
-          const fechaInicio = row['Fecha Inicio'] || row['FECHA_INICIO'] || row['FechaInicio'];
+          const fechaInicioRaw = row['Fecha Inicio'] || row['FECHA_INICIO'] || row['FechaInicio'];
           const montoCuota = Number(row['Monto Cuota'] || row['MONTO_CUOTA'] || row['MontoCuota'] || 0);
           const periodosPago = String(row['Periodos Pago'] || row['PERIODOS_PAGO'] || row['PeriodosPago'] || 'MENSUAL');
 
           const abono = Number(row['Abono'] || row['ABONO'] || 0);
           const saldo = Number(row['Saldo'] || row['SALDO'] || 0);
-          const ultimaFechaAbono = row['Última Fecha Abono'] || row['ULTIMA_FECHA_ABONO'] || row['UltimaFechaAbono'] || null;
+          const ultimaFechaAbonoRaw = row['Última Fecha Abono'] || row['ULTIMA_FECHA_ABONO'] || row['UltimaFechaAbono'] || null;
+
+          // Convertir fechas de Excel (números seriales) a ISO
+          const fechaInicio = fechaInicioRaw
+            ? (typeof fechaInicioRaw === 'number'
+                ? new Date((fechaInicioRaw - 25569) * 86400 * 1000).toISOString()
+                : new Date(fechaInicioRaw).toISOString())
+            : new Date().toISOString();
+
+          const ultimaFechaAbono = ultimaFechaAbonoRaw
+            ? (typeof ultimaFechaAbonoRaw === 'number'
+                ? new Date((ultimaFechaAbonoRaw - 25569) * 86400 * 1000).toISOString()
+                : new Date(ultimaFechaAbonoRaw).toISOString())
+            : null;
 
           const estado = String(row['Estado'] || row['ESTADO'] || 'activo').toLowerCase();
           const diasMora = Number(row['Días Mora'] || row['DIAS_MORA'] || row['DiasMora'] || 0);
@@ -224,12 +261,12 @@ export const rutasCrm: FastifyPluginAsync = async (fastify) => {
               telefono: telefono ? String(telefono) : null,
               municipio: municipio ? String(municipio) : null,
               articulo,
-              fechaInicio: fechaInicio ? new Date(fechaInicio).toISOString() : new Date().toISOString(),
+              fechaInicio,
               montoCuota,
               periodosPago,
               abono,
               saldo,
-              ultimaFechaAbono: ultimaFechaAbono ? new Date(ultimaFechaAbono).toISOString() : null,
+              ultimaFechaAbono,
               estado,
               diasMora,
             });

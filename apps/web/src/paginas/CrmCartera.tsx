@@ -18,6 +18,7 @@ interface ClienteCartera {
   ultimaFechaAbono: string | null;
   estado: string;
   diasMora: number;
+  ultimaGestion: string | null;
 }
 
 interface Paginacion {
@@ -171,6 +172,64 @@ export default function CrmCartera() {
       activo: 'Activo',
     };
     return textos[estado] || estado;
+  }
+
+  function obtenerColorGestion(fechaGestion: string | null): { border: string; bg: string; texto: string; etiqueta: string } {
+    if (!fechaGestion) {
+      return {
+        border: 'border-l-4 border-gray-400',
+        bg: 'bg-gray-50',
+        texto: 'text-gray-700',
+        etiqueta: 'Sin gestión',
+      };
+    }
+
+    const ahora = new Date();
+    const fecha = new Date(fechaGestion);
+
+    // Normalizar a medianoche para comparación de días calendario
+    ahora.setHours(0, 0, 0, 0);
+    fecha.setHours(0, 0, 0, 0);
+
+    const diffMs = ahora.getTime() - fecha.getTime();
+    const diasDiferencia = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diasDiferencia === 0) {
+      return {
+        border: 'border-l-4 border-green-500',
+        bg: 'bg-green-50',
+        texto: 'text-green-800',
+        etiqueta: 'Hoy',
+      };
+    } else if (diasDiferencia === 1) {
+      return {
+        border: 'border-l-4 border-blue-500',
+        bg: 'bg-blue-50',
+        texto: 'text-blue-800',
+        etiqueta: 'Ayer',
+      };
+    } else if (diasDiferencia <= 3) {
+      return {
+        border: 'border-l-4 border-yellow-500',
+        bg: 'bg-yellow-50',
+        texto: 'text-yellow-800',
+        etiqueta: `Hace ${diasDiferencia} días`,
+      };
+    } else if (diasDiferencia <= 7) {
+      return {
+        border: 'border-l-4 border-orange-500',
+        bg: 'bg-orange-50',
+        texto: 'text-orange-800',
+        etiqueta: `Hace ${diasDiferencia} días`,
+      };
+    } else {
+      return {
+        border: 'border-l-4 border-red-500',
+        bg: 'bg-red-50',
+        texto: 'text-red-800',
+        etiqueta: `Hace ${diasDiferencia} días`,
+      };
+    }
   }
 
   return (
@@ -341,6 +400,9 @@ export default function CrmCartera() {
                       Días Mora
                     </th>
                     <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
+                      Última Gestión
+                    </th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
                       Estado
                     </th>
                     <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
@@ -349,56 +411,64 @@ export default function CrmCartera() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {cartera.map((cliente) => (
-                    <tr key={cliente.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 text-sm">{cliente.numero}</td>
-                      <td className="px-4 py-3">
-                        <div className="text-sm font-medium">{cliente.cliente}</div>
-                        <div className="text-xs text-gray-500">{cliente.cedula}</div>
-                        {cliente.telefono && (
-                          <div className="text-xs text-gray-500">{cliente.telefono}</div>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-sm">{cliente.vendedor}</td>
-                      <td className="px-4 py-3 text-sm">{cliente.articulo}</td>
-                      <td className="px-4 py-3 text-sm text-right font-medium">
-                        {formatearPesos(cliente.saldo)}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-right text-gray-600">
-                        {formatearPesos(cliente.abono)}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <span
-                          className={`inline-block px-2 py-1 text-xs font-semibold rounded ${
-                            cliente.diasMora === 0
-                              ? 'bg-green-100 text-green-800'
-                              : cliente.diasMora <= 30
-                              ? 'bg-yellow-100 text-yellow-800'
-                              : 'bg-red-100 text-red-800'
-                          }`}
-                        >
-                          {cliente.diasMora} días
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <span
-                          className={`inline-block px-2 py-1 text-xs font-semibold rounded ${obtenerColorEstado(
-                            cliente.estado
-                          )}`}
-                        >
-                          {obtenerTextoEstado(cliente.estado)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <Link
-                          to={`/crm/cartera/${cliente.id}`}
-                          className="text-blue-600 hover:text-blue-800 text-sm"
-                        >
-                          Ver detalle
-                        </Link>
-                      </td>
-                    </tr>
-                  ))}
+                  {cartera.map((cliente) => {
+                    const colorGestion = obtenerColorGestion(cliente.ultimaGestion);
+                    return (
+                      <tr key={cliente.id} className={`hover:bg-gray-50 ${colorGestion.border} ${colorGestion.bg}`}>
+                        <td className="px-4 py-3 text-sm">{cliente.numero}</td>
+                        <td className="px-4 py-3">
+                          <div className="text-sm font-medium">{cliente.cliente}</div>
+                          <div className="text-xs text-gray-500">{cliente.cedula}</div>
+                          {cliente.telefono && (
+                            <div className="text-xs text-gray-500">{cliente.telefono}</div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-sm">{cliente.vendedor}</td>
+                        <td className="px-4 py-3 text-sm">{cliente.articulo}</td>
+                        <td className="px-4 py-3 text-sm text-right font-medium">
+                          {formatearPesos(cliente.saldo)}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-right text-gray-600">
+                          {formatearPesos(cliente.abono)}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <span
+                            className={`inline-block px-2 py-1 text-xs font-semibold rounded ${
+                              cliente.diasMora === 0
+                                ? 'bg-green-100 text-green-800'
+                                : cliente.diasMora <= 30
+                                ? 'bg-yellow-100 text-yellow-800'
+                                : 'bg-red-100 text-red-800'
+                            }`}
+                          >
+                            {cliente.diasMora} días
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <span className={`inline-block px-2 py-1 text-xs font-semibold rounded ${colorGestion.texto}`}>
+                            {colorGestion.etiqueta}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <span
+                            className={`inline-block px-2 py-1 text-xs font-semibold rounded ${obtenerColorEstado(
+                              cliente.estado
+                            )}`}
+                          >
+                            {obtenerTextoEstado(cliente.estado)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <Link
+                            to={`/crm/cartera/${cliente.id}`}
+                            className="text-blue-600 hover:text-blue-800 text-sm"
+                          >
+                            Ver detalle
+                          </Link>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
