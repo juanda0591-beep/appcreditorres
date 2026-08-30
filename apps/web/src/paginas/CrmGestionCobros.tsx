@@ -62,6 +62,11 @@ export default function CrmGestionCobros() {
   const [mensajeWhatsapp, setMensajeWhatsapp] = useState('');
   const [enviandoWhatsapp, setEnviandoWhatsapp] = useState(false);
 
+  // IA
+  const [analisisIA, setAnalisisIA] = useState<any>(null);
+  const [cargandoAnalisis, setCargandoAnalisis] = useState(false);
+  const [generandoMensaje, setGenerandoMensaje] = useState(false);
+
   useEffect(() => {
     cargarDatos();
     cargarEstadoWhatsapp();
@@ -163,6 +168,59 @@ export default function CrmGestionCobros() {
       alert('Error al enviar mensaje');
     } finally {
       setEnviandoWhatsapp(false);
+    }
+  }
+
+  async function analizarConIA() {
+    if (!clienteSeleccionado) return;
+
+    setCargandoAnalisis(true);
+    try {
+      const res = await fetch(`/api/admin/crm/ia/analizar/${clienteSeleccionado.id}`, {
+        method: 'POST',
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setAnalisisIA(data.analisis);
+      } else {
+        const error = await res.json();
+        alert(`Error: ${error.error}`);
+      }
+    } catch (error) {
+      console.error('Error al analizar con IA:', error);
+      alert('Error al analizar cliente');
+    } finally {
+      setCargandoAnalisis(false);
+    }
+  }
+
+  async function redactarConIA(tono: 'amable' | 'firme' | 'urgente') {
+    if (!clienteSeleccionado) return;
+
+    setGenerandoMensaje(true);
+    try {
+      const res = await fetch('/api/admin/crm/ia/redactar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          carteraClienteId: clienteSeleccionado.id,
+          tono,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setMensajeWhatsapp(data.mensaje);
+      } else {
+        const error = await res.json();
+        alert(`Error: ${error.error}`);
+      }
+    } catch (error) {
+      console.error('Error al generar mensaje:', error);
+      alert('Error al generar mensaje con IA');
+    } finally {
+      setGenerandoMensaje(false);
     }
   }
 
@@ -628,6 +686,86 @@ export default function CrmGestionCobros() {
                   </div>
                 ) : null}
 
+                {/* Análisis de IA */}
+                <div className="mb-4 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <div className="flex justify-between items-start mb-2">
+                    <h4 className="font-medium text-blue-900">Análisis de IA</h4>
+                    <button
+                      onClick={analizarConIA}
+                      disabled={cargandoAnalisis}
+                      className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400"
+                    >
+                      {cargandoAnalisis ? 'Analizando...' : 'Analizar Cliente'}
+                    </button>
+                  </div>
+
+                  {analisisIA && (
+                    <div className="mt-2 space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Probabilidad de pago:</span>
+                        <span className="font-medium">
+                          {(analisisIA.probabilidadPago * 100).toFixed(0)}%
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Riesgo:</span>
+                        <span
+                          className={`font-medium px-2 py-0.5 rounded text-xs ${
+                            analisisIA.riesgoMorosidad === 'critico'
+                              ? 'bg-red-100 text-red-800'
+                              : analisisIA.riesgoMorosidad === 'alto'
+                              ? 'bg-orange-100 text-orange-800'
+                              : analisisIA.riesgoMorosidad === 'medio'
+                              ? 'bg-yellow-100 text-yellow-800'
+                              : 'bg-green-100 text-green-800'
+                          }`}
+                        >
+                          {analisisIA.riesgoMorosidad.toUpperCase()}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Acción sugerida:</span>
+                        <p className="font-medium mt-1">{analisisIA.accionSugerida}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Razonamiento:</span>
+                        <p className="text-gray-700 mt-1 text-xs">{analisisIA.razonamiento}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Generar mensaje con IA */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium mb-2">Redactar con IA</label>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => redactarConIA('amable')}
+                      disabled={generandoMensaje || !whatsappConectado || !clienteSeleccionado.telefono}
+                      className="flex-1 px-3 py-2 text-sm border border-green-300 bg-green-50 text-green-700 rounded hover:bg-green-100 disabled:bg-gray-100 disabled:text-gray-400"
+                    >
+                      Tono Amable
+                    </button>
+                    <button
+                      onClick={() => redactarConIA('firme')}
+                      disabled={generandoMensaje || !whatsappConectado || !clienteSeleccionado.telefono}
+                      className="flex-1 px-3 py-2 text-sm border border-yellow-300 bg-yellow-50 text-yellow-700 rounded hover:bg-yellow-100 disabled:bg-gray-100 disabled:text-gray-400"
+                    >
+                      Tono Firme
+                    </button>
+                    <button
+                      onClick={() => redactarConIA('urgente')}
+                      disabled={generandoMensaje || !whatsappConectado || !clienteSeleccionado.telefono}
+                      className="flex-1 px-3 py-2 text-sm border border-red-300 bg-red-50 text-red-700 rounded hover:bg-red-100 disabled:bg-gray-100 disabled:text-gray-400"
+                    >
+                      Tono Urgente
+                    </button>
+                  </div>
+                  {generandoMensaje && (
+                    <p className="text-xs text-gray-500 mt-1">Generando mensaje personalizado...</p>
+                  )}
+                </div>
+
                 <div className="mb-4">
                   <label className="block text-sm font-medium mb-1">Plantilla</label>
                   <select
@@ -657,7 +795,7 @@ export default function CrmGestionCobros() {
                     onChange={(e) => setMensajeWhatsapp(e.target.value)}
                     className="w-full px-3 py-2 border rounded"
                     rows={6}
-                    placeholder="Escribe tu mensaje o selecciona una plantilla..."
+                    placeholder="Escribe tu mensaje, selecciona una plantilla o genera uno con IA..."
                     disabled={!whatsappConectado || !clienteSeleccionado.telefono}
                   />
                   <p className="text-xs text-gray-500 mt-1">
