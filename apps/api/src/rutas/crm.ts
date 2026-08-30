@@ -619,4 +619,465 @@ export const rutasCrm: FastifyPluginAsync = async (fastify) => {
       cambios,
     };
   });
+
+  // ============================================================================
+  // WHATSAPP - Envío de mensajes
+  // ============================================================================
+
+  /**
+   * GET /api/admin/crm/whatsapp/estado
+   *
+   * Obtiene el estado de conexión de WhatsApp para saber si se pueden enviar mensajes.
+   */
+  fastify.get('/whatsapp/estado', async (request, reply) => {
+    if (!request.usuario || request.usuario.rol !== 'admin') {
+      return reply.code(403).send({ error: 'No autorizado' });
+    }
+
+    const { obtenerEstadoConexion } = await import('../whatsapp/baileys-client.js');
+    const estado = obtenerEstadoConexion();
+
+    return estado;
+  });
+
+  /**
+   * POST /api/admin/crm/whatsapp/enviar
+   *
+   * Envía un mensaje de WhatsApp a un cliente y registra automáticamente la gestión.
+   */
+  fastify.post('/whatsapp/enviar', async (request, reply) => {
+    if (!request.usuario || request.usuario.rol !== 'admin') {
+      return reply.code(403).send({ error: 'No autorizado' });
+    }
+
+    const schema = z.object({
+      carteraClienteId: z.string(),
+      mensaje: z.string().min(1),
+    });
+
+    const datos = schema.parse(request.body);
+
+    // Obtener cliente
+    const [cliente] = await db
+      .select()
+      .from(carteraClientes)
+      .where(eq(carteraClientes.id, datos.carteraClienteId))
+      .limit(1);
+
+    if (!cliente) {
+      return reply.code(404).send({ error: 'Cliente no encontrado' });
+    }
+
+    if (!cliente.telefono) {
+      return reply.code(400).send({ error: 'El cliente no tiene teléfono registrado' });
+    }
+
+    // Normalizar teléfono a formato colombiano (57 + 10 dígitos)
+    const telefonoLimpio = cliente.telefono.replace(/\D/g, '');
+    const telefonoNormalizado = telefonoLimpio.startsWith('57')
+      ? telefonoLimpio
+      : `57${telefonoLimpio}`;
+
+    // Verificar conexión de WhatsApp
+    const { obtenerEstadoConexion, enviarMensajeWhatsApp } = await import('../whatsapp/baileys-client.js');
+    const estado = obtenerEstadoConexion();
+
+    if (!estado.conectado) {
+      return reply.code(503).send({ error: 'WhatsApp no está conectado' });
+    }
+
+    try {
+      // Enviar mensaje
+      await enviarMensajeWhatsApp(telefonoNormalizado, datos.mensaje);
+
+      // Registrar gestión automáticamente
+      await db.insert(gestionesCobro).values({
+        carteraClienteId: datos.carteraClienteId,
+        tipoGestion: 'whatsapp',
+        canal: 'whatsapp',
+        resultado: 'mensaje_enviado',
+        notas: datos.mensaje,
+        usuarioId: request.usuario.id,
+        nombreUsuario: request.usuario.nombre,
+      });
+
+      return { success: true, message: 'Mensaje enviado y gestión registrada' };
+    } catch (error) {
+      fastify.log.error(error);
+      return reply.code(500).send({ error: 'Error al enviar mensaje' });
+    }
+  });
+
+  // ============================================================================
+  // PLANTILLAS - CRUD
+  // ============================================================================
+
+  /**
+   * GET /api/admin/crm/plantillas
+   *
+   * Lista todas las plantillas de mensajes.
+   */
+  fastify.get('/plantillas', async (request, reply) => {
+    if (!request.usuario || request.usuario.rol !== 'admin') {
+      return reply.code(403).send({ error: 'No autorizado' });
+    }
+
+    const { plantillasCobranza } = await import('../db/esquema/crm.js');
+
+    const plantillas = await db
+      .select()
+      .from(plantillasCobranza)
+      .orderBy(asc(plantillasCobranza.orden));
+
+    return { plantillas };
+  });
+
+  /**
+   * GET /api/admin/crm/plantillas/:id/previsualizar
+   *
+   * Previsualiza una plantilla con datos reales de un cliente.
+   */
+  fastify.get('/plantillas/:id/previsualizar', async (request, reply) => {
+    if (!request.usuario || request.usuario.rol !== 'admin') {
+      return reply.code(403).send({ error: 'No autorizado' });
+    }
+
+    const paramsSchema = z.object({
+      id: z.string(),
+    });
+
+    const querySchema = z.object({
+      carteraClienteId: z.string(),
+    });
+
+    const { id } = paramsSchema.parse(request.params);
+    const { carteraClienteId } = querySchema.parse(request.query);
+
+    const { plantillasCobranza } = await import('../db/esquema/crm.js');
+
+    // Obtener plantilla
+    const [plantilla] = await db
+      .select()
+      .from(plantillasCobranza)
+      .where(eq(plantillasCobranza.id, id))
+      .limit(1);
+
+    if (!plantilla) {
+      return reply.code(404).send({ error: 'Plantilla no encontrada' });
+    }
+
+    // Obtener cliente
+    const [cliente] = await db
+      .select()
+      .from(carteraClientes)
+      .where(eq(carteraClientes.id, carteraClienteId))
+      .limit(1);
+
+    if (!cliente) {
+      return reply.code(404).send({ error: 'Cliente no encontrado' });
+    }
+
+    // Reemplazar variables
+    const { reemplazarVariablesPlantilla } = await import('../servicios/plantillas.js');
+    const mensajeResuelto = reemplazarVariablesPlantilla(plantilla.cuerpo, cliente);
+
+    return { mensaje: mensajeResuelto };
+  });
+
+  /**
+   * POST /api/admin/crm/plantillas
+   *
+   * Crea una nueva plantilla.
+   */
+  fastify.post('/plantillas', async (request, reply) => {
+    if (!request.usuario || request.usuario.rol !== 'admin') {
+      return reply.code(403).send({ error: 'No autorizado' });
+    }
+
+    const schema = z.object({
+      nombre: z.string(),
+      categoria: z.string(),
+      cuerpo: z.string(),
+      activa: z.boolean().default(true),
+      orden: z.number().default(0),
+    });
+
+    const datos = schema.parse(request.body);
+
+    const { plantillasCobranza } = await import('../db/esquema/crm.js');
+
+    const [plantilla] = await db
+      .insert(plantillasCobranza)
+      .values(datos)
+      .returning();
+
+    return { plantilla };
+  });
+
+  /**
+   * PUT /api/admin/crm/plantillas/:id
+   *
+   * Actualiza una plantilla existente.
+   */
+  fastify.put('/plantillas/:id', async (request, reply) => {
+    if (!request.usuario || request.usuario.rol !== 'admin') {
+      return reply.code(403).send({ error: 'No autorizado' });
+    }
+
+    const paramsSchema = z.object({
+      id: z.string(),
+    });
+
+    const bodySchema = z.object({
+      nombre: z.string().optional(),
+      categoria: z.string().optional(),
+      cuerpo: z.string().optional(),
+      activa: z.boolean().optional(),
+      orden: z.number().optional(),
+    });
+
+    const { id } = paramsSchema.parse(request.params);
+    const datos = bodySchema.parse(request.body);
+
+    const { plantillasCobranza } = await import('../db/esquema/crm.js');
+
+    const [plantilla] = await db
+      .update(plantillasCobranza)
+      .set({
+        ...datos,
+        actualizadoEn: new Date().toISOString(),
+      })
+      .where(eq(plantillasCobranza.id, id))
+      .returning();
+
+    if (!plantilla) {
+      return reply.code(404).send({ error: 'Plantilla no encontrada' });
+    }
+
+    return { plantilla };
+  });
+
+  /**
+   * DELETE /api/admin/crm/plantillas/:id
+   *
+   * Elimina una plantilla.
+   */
+  fastify.delete('/plantillas/:id', async (request, reply) => {
+    if (!request.usuario || request.usuario.rol !== 'admin') {
+      return reply.code(403).send({ error: 'No autorizado' });
+    }
+
+    const paramsSchema = z.object({
+      id: z.string(),
+    });
+
+    const { id } = paramsSchema.parse(request.params);
+
+    const { plantillasCobranza } = await import('../db/esquema/crm.js');
+
+    await db
+      .delete(plantillasCobranza)
+      .where(eq(plantillasCobranza.id, id));
+
+    return { success: true };
+  });
+
+  // ============================================================================
+  // IA - Análisis y asistencia
+  // ============================================================================
+
+  /**
+   * POST /api/admin/crm/ia/analizar/:carteraClienteId
+   *
+   * Analiza un cliente con IA y persiste el resultado.
+   */
+  fastify.post('/ia/analizar/:carteraClienteId', async (request, reply) => {
+    if (!request.usuario || request.usuario.rol !== 'admin') {
+      return reply.code(403).send({ error: 'No autorizado' });
+    }
+
+    const paramsSchema = z.object({
+      carteraClienteId: z.string(),
+    });
+
+    const { carteraClienteId } = paramsSchema.parse(request.params);
+
+    // Obtener cliente
+    const [cliente] = await db
+      .select()
+      .from(carteraClientes)
+      .where(eq(carteraClientes.id, carteraClienteId))
+      .limit(1);
+
+    if (!cliente) {
+      return reply.code(404).send({ error: 'Cliente no encontrado' });
+    }
+
+    // Verificar si hay análisis vigente (menos de 24 horas)
+    const { analisisCarteraIA } = await import('../db/esquema/crm.js');
+
+    const ahora = new Date();
+    const analisisExistentes = await db
+      .select()
+      .from(analisisCarteraIA)
+      .where(eq(analisisCarteraIA.carteraClienteId, carteraClienteId))
+      .orderBy(desc(analisisCarteraIA.fechaAnalisis))
+      .limit(1);
+
+    if (analisisExistentes.length > 0) {
+      const analisis = analisisExistentes[0];
+      const vigenciaHasta = analisis.vigenciaHasta ? new Date(analisis.vigenciaHasta) : null;
+
+      if (vigenciaHasta && vigenciaHasta > ahora) {
+        return { analisis, fromCache: true };
+      }
+    }
+
+    // Obtener historial
+    const gestiones = await db
+      .select()
+      .from(gestionesCobro)
+      .where(eq(gestionesCobro.carteraClienteId, carteraClienteId))
+      .orderBy(desc(gestionesCobro.fechaGestion))
+      .limit(10);
+
+    const pagos = await db
+      .select()
+      .from(pagosCartera)
+      .where(eq(pagosCartera.carteraClienteId, carteraClienteId))
+      .orderBy(desc(pagosCartera.fechaPago))
+      .limit(10);
+
+    // Analizar con IA
+    const { analizarClienteCartera } = await import('../servicios/agente-cobranza.js');
+
+    try {
+      const resultado = await analizarClienteCartera(cliente, gestiones, pagos);
+
+      // Calcular vigencia (24 horas desde ahora)
+      const vigenciaHasta = new Date();
+      vigenciaHasta.setHours(vigenciaHasta.getHours() + 24);
+
+      // Persistir análisis
+      const [analisis] = await db
+        .insert(analisisCarteraIA)
+        .values({
+          carteraClienteId,
+          probabilidadPago: resultado.probabilidadPago,
+          riesgoMorosidad: resultado.riesgoMorosidad,
+          accionSugerida: resultado.accionSugerida,
+          razonamiento: resultado.razonamiento,
+          confianza: resultado.confianza,
+          modeloUtilizado: 'gpt-4o-mini',
+          vigenciaHasta: vigenciaHasta.toISOString(),
+        })
+        .returning();
+
+      return { analisis, fromCache: false };
+    } catch (error) {
+      fastify.log.error(error);
+      return reply.code(500).send({ error: 'Error al analizar cliente con IA' });
+    }
+  });
+
+  /**
+   * POST /api/admin/crm/ia/redactar
+   *
+   * Genera un mensaje de WhatsApp personalizado usando IA.
+   */
+  fastify.post('/ia/redactar', async (request, reply) => {
+    if (!request.usuario || request.usuario.rol !== 'admin') {
+      return reply.code(403).send({ error: 'No autorizado' });
+    }
+
+    const schema = z.object({
+      carteraClienteId: z.string(),
+      tono: z.enum(['amable', 'firme', 'urgente']).default('amable'),
+    });
+
+    const datos = schema.parse(request.body);
+
+    // Obtener cliente
+    const [cliente] = await db
+      .select()
+      .from(carteraClientes)
+      .where(eq(carteraClientes.id, datos.carteraClienteId))
+      .limit(1);
+
+    if (!cliente) {
+      return reply.code(404).send({ error: 'Cliente no encontrado' });
+    }
+
+    // Obtener gestiones recientes
+    const gestiones = await db
+      .select()
+      .from(gestionesCobro)
+      .where(eq(gestionesCobro.carteraClienteId, datos.carteraClienteId))
+      .orderBy(desc(gestionesCobro.fechaGestion))
+      .limit(5);
+
+    // Generar mensaje con IA
+    const { redactarMensajeCobranza } = await import('../servicios/agente-cobranza.js');
+
+    try {
+      const mensaje = await redactarMensajeCobranza(cliente, gestiones, datos.tono);
+      return { mensaje };
+    } catch (error) {
+      fastify.log.error(error);
+      return reply.code(500).send({ error: 'Error al generar mensaje con IA' });
+    }
+  });
+
+  /**
+   * GET /api/admin/crm/ia/resumen
+   *
+   * Obtiene un resumen de la cartera analizada por IA.
+   */
+  fastify.get('/ia/resumen', async (request, reply) => {
+    if (!request.usuario || request.usuario.rol !== 'admin') {
+      return reply.code(403).send({ error: 'No autorizado' });
+    }
+
+    const { analisisCarteraIA } = await import('../db/esquema/crm.js');
+
+    // Obtener análisis vigentes
+    const ahora = new Date().toISOString();
+
+    const analisisVigentes = await db
+      .select({
+        id: analisisCarteraIA.id,
+        carteraClienteId: analisisCarteraIA.carteraClienteId,
+        riesgoMorosidad: analisisCarteraIA.riesgoMorosidad,
+        probabilidadPago: analisisCarteraIA.probabilidadPago,
+        accionSugerida: analisisCarteraIA.accionSugerida,
+        fechaAnalisis: analisisCarteraIA.fechaAnalisis,
+        cliente: carteraClientes.cliente,
+        numero: carteraClientes.numero,
+        saldo: carteraClientes.saldo,
+        diasMora: carteraClientes.diasMora,
+      })
+      .from(analisisCarteraIA)
+      .innerJoin(carteraClientes, eq(analisisCarteraIA.carteraClienteId, carteraClientes.id))
+      .where(sql`${analisisCarteraIA.vigenciaHasta} > ${ahora}`)
+      .orderBy(desc(analisisCarteraIA.fechaAnalisis));
+
+    // Agrupar por riesgo
+    const distribucion = {
+      critico: analisisVigentes.filter(a => a.riesgoMorosidad === 'critico').length,
+      alto: analisisVigentes.filter(a => a.riesgoMorosidad === 'alto').length,
+      medio: analisisVigentes.filter(a => a.riesgoMorosidad === 'medio').length,
+      bajo: analisisVigentes.filter(a => a.riesgoMorosidad === 'bajo').length,
+    };
+
+    // Top 10 más urgentes
+    const masUrgentes = analisisVigentes
+      .filter(a => a.riesgoMorosidad === 'critico' || a.riesgoMorosidad === 'alto')
+      .slice(0, 10);
+
+    return {
+      totalAnalizados: analisisVigentes.length,
+      distribucion,
+      masUrgentes,
+    };
+  });
 };

@@ -159,3 +159,20 @@ export const analisisCarteraIA = sqliteTable('analisis_cartera_ia', {
   fechaAnalisis: text('fecha_analisis').notNull().$defaultFn(() => new Date().toISOString()),
   vigenciaHasta: text('vigencia_hasta'), // Cuándo se debe recalcular
 });
+
+/**
+ * Plantillas de mensajes para cobranza
+ */
+export const plantillasCobranza = sqliteTable('plantillas_cobranza', {
+  id: text('id').primaryKey().$defaultFn(idPorDefecto),
+
+  nombre: text('nombre').notNull(),
+  categoria: text('categoria').notNull(), // recordatorio, mora_temprana, mora_alta, promesa, agradecimiento
+  cuerpo: text('cuerpo').notNull(), // Admite variables: {{cliente}}, {{numero}}, {{saldo}}, etc.
+
+  activa: integer('activa', { mode: 'boolean' }).notNull().default(true),
+  orden: integer('orden').notNull().default(0),
+
+  creadoEn: text('creado_en').notNull().$defaultFn(() => new Date().toISOString()),
+  actualizadoEn: text('actualizado_en').notNull().$defaultFn(() => new Date().toISOString()),
+});
