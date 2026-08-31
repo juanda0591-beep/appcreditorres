@@ -10,6 +10,112 @@ import {
   carteraCambios,
 } from '../db/esquema/crm.js';
 
+/** Fecha de hoy como medianoche UTC, el formato en que se guardan las fechas. */
+function hoyISO(): string {
+  return new Date().toISOString().split('T')[0] + 'T00:00:00.000Z';
+}
+
+/**
+ * Nombres con los que puede venir la columna de última fecha de abono.
+ *
+ * Se declara aquí, y no dentro del handler, para que la lectura de la celda y
+ * la advertencia de "columna no encontrada" usen exactamente la misma lista.
+ * En los archivos reales el encabezado viene abreviado ("Ulti.Fecha Abono"),
+ * así que incluimos las formas cortas además de las completas.
+ */
+const ALIAS_ULTIMA_FECHA_ABONO = [
+  'Última Fecha Abono',
+  'Ultima Fecha Abono',
+  'UltimaFechaAbono',
+  'Ulti.Fecha Abono',
+  'Ult.Fecha Abono',
+  'Ulti Fecha Abono',
+  'Ult Fecha Abono',
+  'Fecha Último Abono',
+  'Fecha Ultimo Abono',
+  'Fecha Ult Abono',
+  'Último Abono',
+  'Ultimo Abono',
+  'Ulti Abono',
+  'Ult Abono',
+  'Fecha Abono',
+  'Fecha Último Pago',
+  'Fecha Ultimo Pago',
+  'Último Pago',
+  'Ultimo Pago',
+];
+
+/** Nombres con los que puede venir la columna de fecha de inicio. */
+const ALIAS_FECHA_INICIO = [
+  'Fecha Inicio',
+  'FechaInicio',
+  'Fecha de Inicio',
+  'Fec.Inicio',
+  'Fecha Ini',
+  'Inicio',
+];
+
+/**
+ * Convierte un valor de fecha del Excel a medianoche UTC en ISO.
+ *
+ * Acepta los tres formatos que produce `sheet_to_json`: el número serial de
+ * Excel (días desde 1900-01-01, con su bug del año bisiesto), un `Date` ya
+ * parseado por la librería, o texto escrito a mano.
+ *
+ * El texto se interpreta como día/mes/año (formato colombiano) y nunca se pasa
+ * por `new Date(texto)`, que lo leería como mes/día/año y además aplicaría la
+ * zona horaria local, corriendo la fecha un día.
+ */
+export function normalizarFechaExcel(valor: unknown): string | null {
+  if (valor === undefined || valor === null || valor === '') return null;
+
+  const desdePartes = (anio: number, mes: number, dia: number): string | null => {
+    if (mes < 1 || mes > 12 || dia < 1 || dia > 31) return null;
+    const fecha = new Date(Date.UTC(anio, mes - 1, dia));
+    // Rechaza fechas que se desbordan, p.ej. 31/02.
+    if (fecha.getUTCMonth() !== mes - 1 || fecha.getUTCDate() !== dia) return null;
+    return fecha.toISOString().split('T')[0] + 'T00:00:00.000Z';
+  };
+
+  if (typeof valor === 'number') {
+    if (!Number.isFinite(valor) || valor <= 0) return null;
+    // La fracción del serial es la hora del día, así que nos quedamos con los
+    // días. Pero un serial puede llegar como 46151.99999 por error de coma
+    // flotante: en ese caso truncar restaría un día, así que primero acercamos
+    // los valores que están a un pelo de un entero. El margen equivale a unos
+    // 8 segundos: muy por encima del error de coma flotante y muy por debajo de
+    // cualquier hora real escrita en la celda.
+    const margen = 1e-4;
+    const dias =
+      Math.abs(valor - Math.round(valor)) < margen ? Math.round(valor) : Math.floor(valor);
+    return new Date(Math.round((dias - 25569) * 86400 * 1000)).toISOString().split('T')[0] + 'T00:00:00.000Z';
+  }
+
+  if (valor instanceof Date) {
+    if (Number.isNaN(valor.getTime())) return null;
+    // xlsx construye el Date en hora local, así que leemos los componentes
+    // locales para no perder un día al normalizar a UTC.
+    return desdePartes(valor.getFullYear(), valor.getMonth() + 1, valor.getDate());
+  }
+
+  const texto = String(valor).trim();
+  if (texto === '') return null;
+
+  // ISO: 2026-03-20 (con hora opcional)
+  const iso = texto.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (iso) return desdePartes(Number(iso[1]), Number(iso[2]), Number(iso[3]));
+
+  // Colombiano: 20/03/2026, 20-3-26, 20.03.2026
+  const dmy = texto.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$/);
+  if (dmy) {
+    let anio = Number(dmy[3]);
+    if (anio < 100) anio += anio < 70 ? 2000 : 1900;
+    return desdePartes(anio, Number(dmy[2]), Number(dmy[1]));
+  }
+
+  return null;
+}
+
 /**
  * Rutas del módulo CRM de Cobranza.
  *
@@ -197,46 +303,77 @@ export const rutasCrm: FastifyPluginAsync = async (fastify) => {
       let sinCambios = 0;
       const errores: string[] = [];
 
+      // Los encabezados del Excel varían en tildes, mayúsculas, espacios y
+      // guiones bajos. Normalizamos cada nombre de columna una sola vez y
+      // buscamos por esa forma canónica en lugar de listar cada variante.
+      const normalizarEncabezado = (texto: string): string =>
+        texto
+          .normalize('NFD')
+          .replace(/[̀-ͯ]/g, '')
+          .replace(/[^a-zA-Z0-9]/g, '')
+          .toLowerCase();
+
+      // Tomamos los encabezados de la primera fila de la hoja, no de las claves
+      // de rows[0]: sheet_to_json omite las celdas vacías, así que una columna
+      // en blanco en el primer registro desaparecería del índice.
+      const [filaEncabezados = []] = utils.sheet_to_json<string[]>(sheet, {
+        header: 1,
+        range: 0,
+        blankrows: false,
+      });
+
+      const indiceEncabezados = new Map<string, string>();
+      for (const nombreColumna of filaEncabezados) {
+        if (typeof nombreColumna === 'string' && nombreColumna.trim() !== '') {
+          indiceEncabezados.set(normalizarEncabezado(nombreColumna), nombreColumna);
+        }
+      }
+
+      /** Lee una celda probando varios alias de encabezado ya normalizados. */
+      const leerCelda = (row: any, ...alias: string[]): any => {
+        for (const nombre of alias) {
+          const columnaReal = indiceEncabezados.get(normalizarEncabezado(nombre));
+          if (columnaReal !== undefined) {
+            const valor = row[columnaReal];
+            if (valor !== undefined && valor !== null && valor !== '') return valor;
+          }
+        }
+        return undefined;
+      };
+
       for (const row of rows) {
         try {
           // Mapeo de columnas Excel a campos de BD
-          const numero = String(row['Número'] || row['NUMERO'] || row['Numero'] || '').trim();
+          const numero = String(leerCelda(row, 'Número', 'Numero', 'Num', 'Credito', 'Crédito') ?? '').trim();
 
           if (!numero) {
             errores.push(`Fila sin número de crédito: ${JSON.stringify(row)}`);
             continue;
           }
 
-          const cliente = String(row['Cliente'] || row['CLIENTE'] || '').trim();
-          const cedula = String(row['Cédula'] || row['CEDULA'] || row['Cedula'] || '').trim();
-          const vendedor = String(row['Vendedor'] || row['VENDEDOR'] || '').trim();
-          const telefono = row['Teléfono'] || row['TELEFONO'] || row['Telefono'] || null;
-          const municipio = row['Municipio'] || row['MUNICIPIO'] || null;
-          const articulo = String(row['Artículo'] || row['ARTICULO'] || row['Articulo'] || '').trim();
+          const cliente = String(leerCelda(row, 'Cliente', 'Nombre') ?? '').trim();
+          const cedula = String(leerCelda(row, 'Cédula', 'Cedula', 'Documento', 'CC') ?? '').trim();
+          const vendedor = String(leerCelda(row, 'Vendedor', 'Asesor') ?? '').trim();
+          const telefono = leerCelda(row, 'Teléfono', 'Telefono', 'Celular', 'Movil', 'Móvil') ?? null;
+          const municipio = leerCelda(row, 'Municipio', 'Ciudad', 'Ubicacion', 'Ubicación') ?? null;
+          const articulo = String(leerCelda(row, 'Artículo', 'Articulo', 'Producto') ?? '').trim();
 
-          const fechaInicioRaw = row['Fecha Inicio'] || row['FECHA_INICIO'] || row['FechaInicio'];
-          const montoCuota = Number(row['Monto Cuota'] || row['MONTO_CUOTA'] || row['MontoCuota'] || 0);
-          const periodosPago = String(row['Periodos Pago'] || row['PERIODOS_PAGO'] || row['PeriodosPago'] || 'MENSUAL');
+          const fechaInicioRaw = leerCelda(row, ...ALIAS_FECHA_INICIO);
+          const montoCuota = Number(leerCelda(row, 'Monto Cuota', 'MontoCuota', 'Cuota', 'Valor Cuota') ?? 0);
+          const periodosPago = String(
+            leerCelda(row, 'Periodos Pago', 'PeriodosPago', 'Período', 'Periodo', 'Periodicidad', 'Frecuencia') ??
+              'MENSUAL'
+          );
 
-          const abono = Number(row['Abono'] || row['ABONO'] || 0);
-          const saldo = Number(row['Saldo'] || row['SALDO'] || 0);
-          const ultimaFechaAbonoRaw = row['Última Fecha Abono'] || row['ULTIMA_FECHA_ABONO'] || row['UltimaFechaAbono'] || null;
+          const abono = Number(leerCelda(row, 'Abono', 'Abonos', 'Pagado') ?? 0);
+          const saldo = Number(leerCelda(row, 'Saldo', 'Saldo Actual', 'Deuda') ?? 0);
+          const ultimaFechaAbonoRaw = leerCelda(row, ...ALIAS_ULTIMA_FECHA_ABONO);
 
-          // Convertir fechas de Excel (números seriales) a ISO
-          const fechaInicio = fechaInicioRaw
-            ? (typeof fechaInicioRaw === 'number'
-                ? new Date((fechaInicioRaw - 25569) * 86400 * 1000).toISOString()
-                : new Date(fechaInicioRaw).toISOString())
-            : new Date().toISOString();
+          const fechaInicio = normalizarFechaExcel(fechaInicioRaw) ?? hoyISO();
+          const ultimaFechaAbono = normalizarFechaExcel(ultimaFechaAbonoRaw);
 
-          const ultimaFechaAbono = ultimaFechaAbonoRaw
-            ? (typeof ultimaFechaAbonoRaw === 'number'
-                ? new Date((ultimaFechaAbonoRaw - 25569) * 86400 * 1000).toISOString()
-                : new Date(ultimaFechaAbonoRaw).toISOString())
-            : null;
-
-          const estado = String(row['Estado'] || row['ESTADO'] || 'activo').toLowerCase();
-          const diasMora = Number(row['Días Mora'] || row['DIAS_MORA'] || row['DiasMora'] || 0);
+          const estado = String(leerCelda(row, 'Estado', 'Situacion', 'Situación') ?? 'activo').toLowerCase();
+          const diasMora = Number(leerCelda(row, 'Días Mora', 'Dias Mora', 'DiasMora', 'Mora') ?? 0);
 
           // Validar campos obligatorios
           if (!cliente || !cedula || !vendedor || !articulo) {
@@ -295,6 +432,19 @@ export const rutasCrm: FastifyPluginAsync = async (fastify) => {
               cambios.push({ campo: 'telefono', anterior: registro.telefono, nuevo: telefono });
             }
 
+            // Detectar cambios en fechas
+            const fechaInicioNormalizada = fechaInicio.split('T')[0];
+            const fechaInicioExistenteNormalizada = registro.fechaInicio ? registro.fechaInicio.split('T')[0] : null;
+            if (fechaInicioExistenteNormalizada !== fechaInicioNormalizada) {
+              cambios.push({ campo: 'fechaInicio', anterior: registro.fechaInicio, nuevo: fechaInicio });
+            }
+
+            const ultimaFechaAbonoNormalizada = ultimaFechaAbono ? ultimaFechaAbono.split('T')[0] : null;
+            const ultimaFechaAbonoExistenteNormalizada = registro.ultimaFechaAbono ? registro.ultimaFechaAbono.split('T')[0] : null;
+            if (ultimaFechaAbonoNormalizada !== ultimaFechaAbonoExistenteNormalizada) {
+              cambios.push({ campo: 'ultimaFechaAbono', anterior: registro.ultimaFechaAbono, nuevo: ultimaFechaAbono });
+            }
+
             if (cambios.length > 0) {
               // Actualizar
               await db
@@ -305,7 +455,8 @@ export const rutasCrm: FastifyPluginAsync = async (fastify) => {
                   diasMora,
                   estado,
                   telefono: telefono ? String(telefono) : null,
-                  ultimaFechaAbono: ultimaFechaAbono ? new Date(ultimaFechaAbono).toISOString() : registro.ultimaFechaAbono,
+                  fechaInicio,
+                  ultimaFechaAbono,
                   actualizadoEn: new Date().toISOString(),
                 })
                 .where(eq(carteraClientes.id, registro.id));
@@ -333,6 +484,27 @@ export const rutasCrm: FastifyPluginAsync = async (fastify) => {
         }
       }
 
+      // Si una columna de fecha no coincidió con ningún encabezado, el valor se
+      // guardaría como NULL sin aviso. Lo reportamos junto con los encabezados
+      // encontrados para que el problema sea visible al subir el archivo.
+      const advertencias: string[] = [];
+      const columnasEncontradas = [...indiceEncabezados.values()];
+
+      const tieneColumna = (alias: string[]): boolean =>
+        alias.some((nombre) => indiceEncabezados.has(normalizarEncabezado(nombre)));
+
+      if (!tieneColumna(ALIAS_FECHA_INICIO)) {
+        advertencias.push(
+          `No se encontró la columna "Fecha Inicio". Columnas detectadas: ${columnasEncontradas.join(', ')}`
+        );
+      }
+
+      if (!tieneColumna(ALIAS_ULTIMA_FECHA_ABONO)) {
+        advertencias.push(
+          `No se encontró la columna de última fecha de abono. Columnas detectadas: ${columnasEncontradas.join(', ')}`
+        );
+      }
+
       return {
         procesamiento: {
           nuevos,
@@ -340,6 +512,7 @@ export const rutasCrm: FastifyPluginAsync = async (fastify) => {
           sinCambios,
           errores: errores.length,
         },
+        advertencias: advertencias.length > 0 ? advertencias : undefined,
         detalles: errores.length > 0 ? errores.slice(0, 10) : undefined,
       };
     } catch (error: any) {
@@ -484,6 +657,75 @@ export const rutasCrm: FastifyPluginAsync = async (fastify) => {
     }));
 
     return { clientes };
+  });
+
+  /**
+   * GET /api/admin/crm/gestiones/recientes
+   *
+   * Gestiones realizadas hoy (sin filtrar por fecha de próxima acción).
+   */
+  fastify.get('/gestiones/recientes', async (request, reply) => {
+    if (!request.usuario || request.usuario.rol !== 'admin') {
+      return reply.code(403).send({ error: 'No autorizado' });
+    }
+
+    const hoy = new Date().toISOString().split('T')[0];
+
+    const recientes = await db
+      .select({
+        gestionId: gestionesCobro.id,
+        fechaGestion: gestionesCobro.fechaGestion,
+        tipoGestion: gestionesCobro.tipoGestion,
+        canal: gestionesCobro.canal,
+        resultado: gestionesCobro.resultado,
+        notas: gestionesCobro.notas,
+        proximaAccion: gestionesCobro.proximaAccion,
+        fechaProximaAccion: gestionesCobro.fechaProximaAccion,
+        clienteId: carteraClientes.id,
+        numero: carteraClientes.numero,
+        cliente: carteraClientes.cliente,
+        cedula: carteraClientes.cedula,
+        telefono: carteraClientes.telefono,
+        vendedor: carteraClientes.vendedor,
+        saldo: carteraClientes.saldo,
+        diasMora: carteraClientes.diasMora,
+        ultimaGestion: sql<string | null>`(
+          SELECT MAX(fecha_gestion)
+          FROM gestiones_cobro
+          WHERE cartera_cliente_id = ${carteraClientes.id}
+        )`,
+      })
+      .from(gestionesCobro)
+      .innerJoin(carteraClientes, eq(gestionesCobro.carteraClienteId, carteraClientes.id))
+      .where(sql`DATE(${gestionesCobro.fechaGestion}) = ${hoy}`)
+      .orderBy(desc(gestionesCobro.fechaGestion));
+
+    // Transformar para que coincida con la estructura esperada
+    const gestiones = recientes.map(r => ({
+      gestion: {
+        id: r.gestionId,
+        fechaGestion: r.fechaGestion,
+        tipoGestion: r.tipoGestion,
+        canal: r.canal,
+        resultado: r.resultado,
+        notas: r.notas,
+        proximaAccion: r.proximaAccion,
+        fechaProximaAccion: r.fechaProximaAccion,
+      },
+      cliente: {
+        id: r.clienteId,
+        numero: r.numero,
+        cliente: r.cliente,
+        cedula: r.cedula,
+        telefono: r.telefono,
+        vendedor: r.vendedor,
+        saldo: r.saldo,
+        diasMora: r.diasMora,
+        ultimaGestion: r.ultimaGestion,
+      },
+    }));
+
+    return { gestiones };
   });
 
   /**
@@ -1117,4 +1359,12 @@ export const rutasCrm: FastifyPluginAsync = async (fastify) => {
       masUrgentes,
     };
   });
+
+  // ============================================================================
+  // ETIQUETAS Y GRUPOS - Importar rutas adicionales
+  // ============================================================================
+
+  // Importar y registrar las rutas de etiquetas y grupos
+  const { rutasEtiquetasGrupos } = await import('./crm-etiquetas.js');
+  await rutasEtiquetasGrupos(fastify);
 };

@@ -19,6 +19,7 @@ import {
   CreditCard,
   Phone,
   ChevronDown,
+  FolderKanban,
 } from 'lucide-react';
 import { useMediaQuery } from '../utilidades/useMediaQuery.js';
 import type { UsuarioSesion } from '../api/hooks.js';
@@ -51,6 +52,7 @@ export const SECCIONES: Seccion[] = [
   // Grupo CRM
   { ruta: '/crm/cartera', texto: 'Cartera', icono: CreditCard, soloAdmin: true, grupo: 'CRM' },
   { ruta: '/crm/gestiones', texto: 'Gestión de Cobros', icono: Phone, soloAdmin: true, grupo: 'CRM' },
+  { ruta: '/crm/grupos', texto: 'Grupos de Gestión', icono: FolderKanban, soloAdmin: true, grupo: 'CRM' },
 
   { ruta: '/usuarios', texto: 'Usuarios', icono: UserCog, soloAdmin: true },
   { ruta: '/ajustes', texto: 'Ajustes', icono: Settings },

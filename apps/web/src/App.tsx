@@ -21,6 +21,8 @@ import { Conversaciones } from './paginas/Conversaciones.js';
 import CrmCartera from './paginas/CrmCartera.js';
 import CrmGestionCobros from './paginas/CrmGestionCobros.js';
 import CrmDetalleCliente from './paginas/CrmDetalleCliente.js';
+import CrmGruposGestion from './paginas/CrmGruposGestion.js';
+import CrmGrupoDetalle from './paginas/CrmGrupoDetalle.js';
 
 export function App() {
   const sesion = useSesion();
@@ -137,6 +139,8 @@ function AppAutenticada({ usuario }: { usuario: UsuarioSesion }) {
               <Route path="/crm/cartera" element={<CrmCartera />} />
               <Route path="/crm/cartera/:id" element={<CrmDetalleCliente />} />
               <Route path="/crm/gestiones" element={<CrmGestionCobros />} />
+              <Route path="/crm/grupos" element={<CrmGruposGestion />} />
+              <Route path="/crm/grupos/:grupoId" element={<CrmGrupoDetalle />} />
             </>
           ) : (
             <Route path="/" element={<Navigate to="/productos" replace />} />

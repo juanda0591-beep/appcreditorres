@@ -131,7 +131,10 @@ export default function CrmDetalleCliente() {
 
   function formatearFecha(fecha: string | null): string {
     if (!fecha) return '-';
+    // Fechas guardadas como medianoche UTC: se formatean en UTC para que no se
+    // corran un día en hora local (Colombia, UTC-5).
     return new Date(fecha).toLocaleDateString('es-CO', {
+      timeZone: 'UTC',
       year: 'numeric',
       month: 'short',
       day: 'numeric',

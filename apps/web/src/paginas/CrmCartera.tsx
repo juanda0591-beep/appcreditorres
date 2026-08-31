@@ -145,7 +145,10 @@ export default function CrmCartera() {
 
   function formatearFecha(fecha: string | null): string {
     if (!fecha) return '-';
-    return new Date(fecha).toLocaleDateString('es-CO');
+    // Las fechas de cartera se guardan como medianoche UTC. Al formatearlas en
+    // hora local (Colombia, UTC-5) se corrían un día hacia atrás, así que las
+    // leemos en UTC.
+    return new Date(fecha).toLocaleDateString('es-CO', { timeZone: 'UTC' });
   }
 
   function obtenerColorEstado(estado: string): string {
@@ -233,8 +236,8 @@ export default function CrmCartera() {
   }
 
   return (
-    <div className="p-6 max-w-[1400px] mx-auto">
-      <div className="flex justify-between items-center mb-6">
+    <div className="p-0">
+      <div className="flex justify-between items-center mb-6 px-6 pt-6">
         <h1 className="text-3xl font-bold">CRM Cobranza - Cartera</h1>
         <Link
           to="/crm/gestiones"
@@ -245,7 +248,7 @@ export default function CrmCartera() {
       </div>
 
       {/* Upload Excel */}
-      <div className="bg-white rounded-lg shadow p-6 mb-6">
+      <div className="bg-white rounded-lg shadow p-6 mb-6 mx-6">
         <h2 className="text-xl font-semibold mb-4">Subir archivo Excel de cartera</h2>
         <div className="flex items-center gap-4">
           <label className="cursor-pointer px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
@@ -282,12 +285,25 @@ export default function CrmCartera() {
                 {resultadoUpload.procesamiento.sinCambios}
               </div>
             </div>
+
+            {resultadoUpload.advertencias && (
+              <div className="mt-3 p-3 bg-amber-50 border border-amber-300 rounded text-sm text-amber-900">
+                <div className="font-semibold mb-1">Columnas no reconocidas</div>
+                <ul className="list-disc list-inside space-y-1">
+                  {resultadoUpload.advertencias.map((aviso: string, i: number) => (
+                    <li key={i} className="break-words">
+                      {aviso}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         )}
       </div>
 
       {/* Filtros */}
-      <div className="bg-white rounded-lg shadow p-6 mb-6">
+      <div className="bg-white rounded-lg shadow p-6 mb-6 mx-6">
         <h2 className="text-xl font-semibold mb-4">Filtros</h2>
         <div className="grid grid-cols-4 gap-4">
           <div>
@@ -375,37 +391,37 @@ export default function CrmCartera() {
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <table className="min-w-full table-auto">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase w-24">
                       Número
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase min-w-[200px]">
                       Cliente
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase w-32">
                       Vendedor
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase min-w-[150px]">
                       Artículo
                     </th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase w-32">
                       Saldo
                     </th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase w-32">
                       Abono
                     </th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase w-28">
                       Días Mora
                     </th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase w-32">
                       Última Gestión
                     </th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase w-32">
                       Estado
                     </th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase w-28">
                       Acciones
                     </th>
                   </tr>
@@ -415,25 +431,25 @@ export default function CrmCartera() {
                     const colorGestion = obtenerColorGestion(cliente.ultimaGestion);
                     return (
                       <tr key={cliente.id} className={`hover:bg-gray-50 ${colorGestion.border} ${colorGestion.bg}`}>
-                        <td className="px-4 py-3 text-sm">{cliente.numero}</td>
-                        <td className="px-4 py-3">
+                        <td className="px-3 py-3 text-sm whitespace-nowrap">{cliente.numero}</td>
+                        <td className="px-3 py-3">
                           <div className="text-sm font-medium">{cliente.cliente}</div>
                           <div className="text-xs text-gray-500">{cliente.cedula}</div>
                           {cliente.telefono && (
                             <div className="text-xs text-gray-500">{cliente.telefono}</div>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-sm">{cliente.vendedor}</td>
-                        <td className="px-4 py-3 text-sm">{cliente.articulo}</td>
-                        <td className="px-4 py-3 text-sm text-right font-medium">
+                        <td className="px-3 py-3 text-sm">{cliente.vendedor}</td>
+                        <td className="px-3 py-3 text-sm">{cliente.articulo}</td>
+                        <td className="px-3 py-3 text-sm text-right font-medium whitespace-nowrap">
                           {formatearPesos(cliente.saldo)}
                         </td>
-                        <td className="px-4 py-3 text-sm text-right text-gray-600">
+                        <td className="px-3 py-3 text-sm text-right text-gray-600 whitespace-nowrap">
                           {formatearPesos(cliente.abono)}
                         </td>
-                        <td className="px-4 py-3 text-center">
+                        <td className="px-3 py-3 text-center">
                           <span
-                            className={`inline-block px-2 py-1 text-xs font-semibold rounded ${
+                            className={`inline-block px-2 py-1 text-xs font-semibold rounded whitespace-nowrap ${
                               cliente.diasMora === 0
                                 ? 'bg-green-100 text-green-800'
                                 : cliente.diasMora <= 30
@@ -444,21 +460,21 @@ export default function CrmCartera() {
                             {cliente.diasMora} días
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-center">
-                          <span className={`inline-block px-2 py-1 text-xs font-semibold rounded ${colorGestion.texto}`}>
+                        <td className="px-3 py-3 text-center">
+                          <span className={`inline-block px-2 py-1 text-xs font-semibold rounded whitespace-nowrap ${colorGestion.texto}`}>
                             {colorGestion.etiqueta}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-center">
+                        <td className="px-3 py-3 text-center">
                           <span
-                            className={`inline-block px-2 py-1 text-xs font-semibold rounded ${obtenerColorEstado(
+                            className={`inline-block px-2 py-1 text-xs font-semibold rounded whitespace-nowrap ${obtenerColorEstado(
                               cliente.estado
                             )}`}
                           >
                             {obtenerTextoEstado(cliente.estado)}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-center">
+                        <td className="px-3 py-3 text-center whitespace-nowrap">
                           <Link
                             to={`/crm/cartera/${cliente.id}`}
                             className="text-blue-600 hover:text-blue-800 text-sm"

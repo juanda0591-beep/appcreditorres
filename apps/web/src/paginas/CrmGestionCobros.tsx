@@ -96,16 +96,25 @@ export default function CrmGestionCobros() {
   async function cargarDatos() {
     setCargando(true);
     try {
-      const [resPrioritarios, resPendientes] = await Promise.all([
+      const [resPrioritarios, resPendientes, resRecientes] = await Promise.all([
         fetch('/api/admin/crm/gestiones/prioritarios'),
         fetch('/api/admin/crm/gestiones/pendientes'),
+        fetch('/api/admin/crm/gestiones/recientes'),
       ]);
 
       const dataPrioritarios = await resPrioritarios.json();
       const dataPendientes = await resPendientes.json();
+      const dataRecientes = await resRecientes.json();
 
       setClientesPrioritarios(dataPrioritarios.clientes || []);
-      setGestionesPendientes(dataPendientes.gestiones || []);
+
+      // Combinar pendientes y recientes, eliminando duplicados
+      const todasGestiones = [...dataPendientes.gestiones || [], ...dataRecientes.gestiones || []];
+      const gestionesUnicas = Array.from(
+        new Map(todasGestiones.map(g => [g.gestion.id, g])).values()
+      );
+
+      setGestionesPendientes(gestionesUnicas);
     } catch (error) {
       console.error('Error al cargar datos:', error);
     } finally {
