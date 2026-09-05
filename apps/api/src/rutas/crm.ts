@@ -203,7 +203,11 @@ export const rutasCrm: FastifyPluginAsync = async (fastify) => {
         saldo: carteraClientes.saldo,
         ultimaFechaAbono: carteraClientes.ultimaFechaAbono,
         estado: carteraClientes.estado,
-        diasMora: carteraClientes.diasMora,
+        diasMora: sql<number>`CASE
+          WHEN ${carteraClientes.saldo} > 0 AND ${carteraClientes.ultimaFechaAbono} IS NOT NULL
+          THEN CAST((julianday('now') - julianday(${carteraClientes.ultimaFechaAbono})) AS INTEGER)
+          ELSE 0
+        END`,
         ultimaGestion: sql<string | null>`(
           SELECT fecha_gestion
           FROM gestiones_cobro
@@ -410,8 +414,16 @@ export const rutasCrm: FastifyPluginAsync = async (fastify) => {
             const ultimaFechaAbono = fechaCelda(ultimaFechaAbonoRaw, registro?.ultimaFechaAbono ?? null);
 
             const estado = String(leerCelda(row, 'Estado', 'Situacion', 'Situación') ?? registro?.estado ?? 'activo').trim().toLowerCase();
-            const diasMora = numeroCelda(registro?.diasMora ?? 0, 'Días Mora', 'Dias Mora', 'DiasMora', 'Mora');
-            if (!Number.isInteger(diasMora)) throw new Error(`Registro ${numero}: dias de mora invalidos`);
+
+            // Calcular días de mora desde la última fecha de abono hasta hoy
+            let diasMora = 0;
+            if (saldo > 0 && ultimaFechaAbono) {
+              const hoy = new Date();
+              const fechaAbono = new Date(ultimaFechaAbono);
+              const diferenciaMilisegundos = hoy.getTime() - fechaAbono.getTime();
+              diasMora = Math.floor(diferenciaMilisegundos / (1000 * 60 * 60 * 24));
+              if (diasMora < 0) diasMora = 0; // No puede ser negativo
+            }
 
             // Validar campos obligatorios
             if (!cliente || !cedula || !vendedor || !articulo || !fechaInicio) {

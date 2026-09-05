@@ -246,13 +246,21 @@ export async function rutasEtiquetasGrupos(fastify: FastifyInstance) {
         telefono: carteraClientes.telefono,
         vendedor: carteraClientes.vendedor,
         saldo: carteraClientes.saldo,
-        diasMora: carteraClientes.diasMora,
+        diasMora: sql<number>`CASE
+          WHEN ${carteraClientes.saldo} > 0 AND ${carteraClientes.ultimaFechaAbono} IS NOT NULL
+          THEN CAST((julianday('now') - julianday(${carteraClientes.ultimaFechaAbono})) AS INTEGER)
+          ELSE 0
+        END`,
         estado: carteraClientes.estado,
       })
       .from(clientesGrupo)
       .innerJoin(carteraClientes, eq(clientesGrupo.carteraClienteId, carteraClientes.id))
       .where(eq(clientesGrupo.grupoId, grupoId))
-      .orderBy(asc(clientesGrupo.orden), desc(carteraClientes.diasMora));
+      .orderBy(asc(clientesGrupo.orden), sql`CASE
+          WHEN ${carteraClientes.saldo} > 0 AND ${carteraClientes.ultimaFechaAbono} IS NOT NULL
+          THEN CAST((julianday('now') - julianday(${carteraClientes.ultimaFechaAbono})) AS INTEGER)
+          ELSE 0
+        END DESC`);
 
     return { grupo, clientes };
   });

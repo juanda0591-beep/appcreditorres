@@ -10,6 +10,16 @@ export const hoyCrm = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Americ
 export const documentoCrm = (valor: string) => valor.trim().replace(/[ .-]/g, '').toUpperCase();
 const columnaDocumento = sql<string>`upper(replace(replace(replace(trim(${carteraClientes.cedula}), '.', ''), ' ', ''), '-', ''))`;
 const abierta = (estado: string) => estado === 'pendiente' || estado === 'parcial';
+
+/** Calcula los días de mora desde la última fecha de abono hasta hoy */
+export const calcularDiasMora = (saldo: number, ultimaFechaAbono: string | null): number => {
+  if (saldo <= 0 || !ultimaFechaAbono) return 0;
+  const hoy = new Date();
+  const fechaAbono = new Date(ultimaFechaAbono);
+  const diferenciaMilisegundos = hoy.getTime() - fechaAbono.getTime();
+  const dias = Math.floor(diferenciaMilisegundos / (1000 * 60 * 60 * 24));
+  return dias < 0 ? 0 : dias;
+};
 const fecha = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(valor => {
   const date = new Date(`${valor}T00:00:00Z`);
   return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === valor;
@@ -185,7 +195,7 @@ export const rutasCrmOperativo: FastifyPluginAsync = async fastify => {
       lista.push(credito); porPersona.set(doc, lista);
     }
     const filas = [...porPersona.entries()].map(([documento, prestamos]) => {
-      const ordenados = prestamos.slice().sort((a, b) => (b.diasMora ?? 0) - (a.diasMora ?? 0) || b.saldo - a.saldo);
+      const ordenados = prestamos.slice().sort((a, b) => calcularDiasMora(b.saldo, b.ultimaFechaAbono) - calcularDiasMora(a.saldo, a.ultimaFechaAbono) || b.saldo - a.saldo);
       const principal = ordenados.find(c => c.saldo > 0) ?? ordenados[0]!;
       const contacto = contactoPorDocumento.get(documento);
       const movimientos = prestamos.flatMap(c => porCredito.get(c.id) ?? []);
@@ -194,8 +204,9 @@ export const rutasCrmOperativo: FastifyPluginAsync = async fastify => {
       const pendientes = movimientos.filter(g => g.fechaProximaAccion && g.fechaProximaAccion.slice(0, 10) <= hoy && !g.seguimientoCerradoEn);
       const compromisos = prestamos.flatMap(c => promesasPorCredito.get(c.id) ?? []);
       const saldo = prestamos.reduce((s, c) => s + c.saldo, 0);
+      const diasMoraPrincipal = calcularDiasMora(principal.saldo, principal.ultimaFechaAbono);
       const categorias: string[] = [];
-      if (principal.saldo > 0 && (principal.diasMora ?? 0) > 0 && (!ultimaGestion || ultimaGestion < hace7)) categorias.push('sin_contacto');
+      if (principal.saldo > 0 && diasMoraPrincipal > 0 && (!ultimaGestion || ultimaGestion < hace7)) categorias.push('sin_contacto');
       if (pendientes.length) categorias.push('seguimientos');
       if (compromisos.some(p => p.fechaCompromiso === hoy)) categorias.push('promesas_hoy');
       if (compromisos.some(p => p.vencida)) categorias.push('promesas_vencidas');
@@ -203,7 +214,7 @@ export const rutasCrmOperativo: FastifyPluginAsync = async fastify => {
       if (compromisos.some(p => p.revision)) categorias.push('revisar_abonos');
       if (compromisos.some(p => p.fechaCompromiso > hoy) || movimientos.some(g => !g.seguimientoCerradoEn && g.fechaProximaAccion && g.fechaProximaAccion.slice(0, 10) > hoy)) categorias.push('proximos');
       return { documento, cliente: principal.cliente, creditoPrincipal: { ...principal, telefono: contacto?.telefonoAlternativo || principal.telefono },
-        creditos: prestamos.map(c => ({ id: c.id, numero: c.numero })), saldo, diasMora: principal.diasMora ?? 0,
+        creditos: prestamos.map(c => ({ id: c.id, numero: c.numero })), saldo, diasMora: diasMoraPrincipal,
         ultimaGestion, pendientes: pendientes.length, promesas: compromisos.length, categorias,
         estadoUbicacion: contacto?.estadoUbicacion ?? 'sin_datos', responsableId: contacto?.responsableId ?? null,
         responsablesIds: [...new Set([contacto?.responsableId, ...compromisos.map(p => p.responsableId)].filter((id): id is string => Boolean(id)))],
@@ -224,7 +235,10 @@ export const rutasCrmOperativo: FastifyPluginAsync = async fastify => {
     const promesasDelMes = promesas.filter(p => mesLocal(p.creadoEn) === mes);
     const tramos = [{ nombre: 'Al dia', min: -Infinity, max: 0 }, { nombre: '1-30 dias', min: 1, max: 30 }, { nombre: '31-60 dias', min: 31, max: 60 },
       { nombre: '61-90 dias', min: 61, max: 90 }, { nombre: 'Mas de 90 dias', min: 91, max: Infinity }].map(t => {
-        const incluidos = creditos.filter(c => c.saldo > 0 && (c.diasMora ?? 0) >= t.min && (c.diasMora ?? 0) <= t.max);
+        const incluidos = creditos.filter(c => {
+          const diasMora = calcularDiasMora(c.saldo, c.ultimaFechaAbono);
+          return c.saldo > 0 && diasMora >= t.min && diasMora <= t.max;
+        });
         return { nombre: t.nombre, creditos: incluidos.length, saldo: incluidos.reduce((s, c) => s + c.saldo, 0) };
       });
     const porGestor = listaResponsables.map(r => ({ nombre: r.nombre,
