@@ -8,11 +8,12 @@ import {
   gestionesCobro,
   pagosCartera,
   carteraCambios,
+  importacionesCrm,
 } from '../db/esquema/crm.js';
+import { rutasCrmOperativo } from './crm-operativo.js';
 
-/** Fecha de hoy como medianoche UTC, el formato en que se guardan las fechas. */
-function hoyISO(): string {
-  return new Date().toISOString().split('T')[0] + 'T00:00:00.000Z';
+function hoyColombia(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
 }
 
 /**
@@ -206,7 +207,7 @@ export const rutasCrm: FastifyPluginAsync = async (fastify) => {
         ultimaGestion: sql<string | null>`(
           SELECT fecha_gestion
           FROM gestiones_cobro
-          WHERE cartera_cliente_id = ${carteraClientes.id}
+          WHERE cartera_cliente_id = cartera_clientes.id
           ORDER BY fecha_gestion DESC
           LIMIT 1
         )`,
@@ -282,6 +283,12 @@ export const rutasCrm: FastifyPluginAsync = async (fastify) => {
       return reply.code(403).send({ error: 'No autorizado' });
     }
 
+    const opciones = z.object({ fechaCorte: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).default(hoyColombia()),
+      aceptarAjustes: z.enum(['true', 'false']).default('false') }).safeParse(request.query);
+    if (!opciones.success || !normalizarFechaExcel(opciones.data.fechaCorte) || opciones.data.fechaCorte > hoyColombia()) {
+      return reply.code(400).send({ error: 'Fecha de corte invalida o futura' });
+    }
+    const { fechaCorte, aceptarAjustes } = opciones.data;
     const data = await request.file();
     if (!data) {
       return reply.code(400).send({ error: 'No se recibió archivo' });
@@ -302,6 +309,9 @@ export const rutasCrm: FastifyPluginAsync = async (fastify) => {
       let actualizados = 0;
       let sinCambios = 0;
       const errores: string[] = [];
+      const [importacion] = await db.insert(importacionesCrm).values({
+        archivo: data.filename, fechaCorte, usuarioId: request.usuario.id,
+      }).returning();
 
       // Los encabezados del Excel varían en tildes, mayúsculas, espacios y
       // guiones bajos. Normalizamos cada nombre de columna una sola vez y
@@ -335,7 +345,7 @@ export const rutasCrm: FastifyPluginAsync = async (fastify) => {
           const columnaReal = indiceEncabezados.get(normalizarEncabezado(nombre));
           if (columnaReal !== undefined) {
             const valor = row[columnaReal];
-            if (valor !== undefined && valor !== null && valor !== '') return valor;
+            if (valor !== undefined && valor !== null && String(valor).trim() !== '') return valor;
           }
         }
         return undefined;
@@ -351,142 +361,179 @@ export const rutasCrm: FastifyPluginAsync = async (fastify) => {
             continue;
           }
 
-          const cliente = String(leerCelda(row, 'Cliente', 'Nombre') ?? '').trim();
-          const cedula = String(leerCelda(row, 'Cédula', 'Cedula', 'Documento', 'CC') ?? '').trim();
-          const vendedor = String(leerCelda(row, 'Vendedor', 'Asesor') ?? '').trim();
-          const telefono = leerCelda(row, 'Teléfono', 'Telefono', 'Celular', 'Movil', 'Móvil') ?? null;
-          const municipio = leerCelda(row, 'Municipio', 'Ciudad', 'Ubicacion', 'Ubicación') ?? null;
-          const articulo = String(leerCelda(row, 'Artículo', 'Articulo', 'Producto') ?? '').trim();
-
-          const fechaInicioRaw = leerCelda(row, ...ALIAS_FECHA_INICIO);
-          const montoCuota = Number(leerCelda(row, 'Monto Cuota', 'MontoCuota', 'Cuota', 'Valor Cuota') ?? 0);
-          const periodosPago = String(
-            leerCelda(row, 'Periodos Pago', 'PeriodosPago', 'Período', 'Periodo', 'Periodicidad', 'Frecuencia') ??
-              'MENSUAL'
-          );
-
-          const abono = Number(leerCelda(row, 'Abono', 'Abonos', 'Pagado') ?? 0);
-          const saldo = Number(leerCelda(row, 'Saldo', 'Saldo Actual', 'Deuda') ?? 0);
-          const ultimaFechaAbonoRaw = leerCelda(row, ...ALIAS_ULTIMA_FECHA_ABONO);
-
-          const fechaInicio = normalizarFechaExcel(fechaInicioRaw) ?? hoyISO();
-          const ultimaFechaAbono = normalizarFechaExcel(ultimaFechaAbonoRaw);
-
-          const estado = String(leerCelda(row, 'Estado', 'Situacion', 'Situación') ?? 'activo').toLowerCase();
-          const diasMora = Number(leerCelda(row, 'Días Mora', 'Dias Mora', 'DiasMora', 'Mora') ?? 0);
-
-          // Validar campos obligatorios
-          if (!cliente || !cedula || !vendedor || !articulo) {
-            errores.push(`Registro ${numero}: faltan campos obligatorios`);
-            continue;
-          }
-
-          // Buscar si existe
-          const existente = await db
-            .select()
-            .from(carteraClientes)
-            .where(eq(carteraClientes.numero, numero))
-            .limit(1);
-
-          if (existente.length === 0) {
-            // Insertar nuevo
-            await db.insert(carteraClientes).values({
-              numero,
-              vendedor,
-              cliente,
-              cedula,
-              telefono: telefono ? String(telefono) : null,
-              municipio: municipio ? String(municipio) : null,
-              articulo,
-              fechaInicio,
-              montoCuota,
-              periodosPago,
-              abono,
-              saldo,
-              ultimaFechaAbono,
-              estado,
-              diasMora,
-            });
-
-            await db.insert(carteraCambios).values({
-              carteraClienteId: numero, // Temporal, se actualizará
-              tipoOperacion: 'insert',
-              campoModificado: 'all',
-              valorAnterior: null,
-              valorNuevo: JSON.stringify({ cliente, cedula, saldo, abono }),
-              archivoOrigen: data.filename,
-              usuarioId: request.usuario.id,
-            });
-
-            nuevos++;
-          } else {
-            // Detectar cambios
-            const registro = existente[0];
-            const cambios: Array<{ campo: string; anterior: any; nuevo: any }> = [];
-
-            if (registro.saldo !== saldo) cambios.push({ campo: 'saldo', anterior: registro.saldo, nuevo: saldo });
-            if (registro.abono !== abono) cambios.push({ campo: 'abono', anterior: registro.abono, nuevo: abono });
-            if (registro.diasMora !== diasMora) cambios.push({ campo: 'diasMora', anterior: registro.diasMora, nuevo: diasMora });
-            if (registro.estado !== estado) cambios.push({ campo: 'estado', anterior: registro.estado, nuevo: estado });
-            if (registro.telefono !== (telefono ? String(telefono) : null)) {
-              cambios.push({ campo: 'telefono', anterior: registro.telefono, nuevo: telefono });
+          const resultado = await db.transaction(async (tx) => {
+            const [registro] = await tx.select().from(carteraClientes)
+              .where(eq(carteraClientes.numero, numero)).limit(1);
+            if (registro?.fechaCorteExcel && fechaCorte < registro.fechaCorteExcel) {
+              throw new Error(`Credito ${numero}: corte anterior al ${registro.fechaCorteExcel}; no se modifico`);
             }
 
-            // Detectar cambios en fechas
-            const fechaInicioNormalizada = fechaInicio.split('T')[0];
-            const fechaInicioExistenteNormalizada = registro.fechaInicio ? registro.fechaInicio.split('T')[0] : null;
-            if (fechaInicioExistenteNormalizada !== fechaInicioNormalizada) {
-              cambios.push({ campo: 'fechaInicio', anterior: registro.fechaInicio, nuevo: fechaInicio });
+            const numeroCelda = (anterior: number | null | undefined, ...alias: string[]): number => {
+              const valor = leerCelda(row, ...alias);
+              const valorNumerico = valor === undefined ? anterior : Number(valor);
+              if (valorNumerico === undefined || valorNumerico === null || !Number.isFinite(valorNumerico)) {
+                throw new Error(`Registro ${numero}: ${alias[0]} ausente o invalido`);
+              }
+              return valorNumerico;
+            };
+            const fechaCelda = (valor: unknown, anterior: string | null): string | null => {
+              if (valor === undefined) return anterior;
+              const fecha = normalizarFechaExcel(valor);
+              if (!fecha) throw new Error(`Registro ${numero}: fecha invalida`);
+              return fecha;
+            };
+
+            const cliente = String(leerCelda(row, 'Cliente', 'Nombre') ?? registro?.cliente ?? '').trim();
+            const cedula = String(leerCelda(row, 'Cédula', 'Cedula', 'Documento', 'CC') ?? registro?.cedula ?? '').trim();
+            const vendedor = String(leerCelda(row, 'Vendedor', 'Asesor') ?? registro?.vendedor ?? '').trim();
+            const telefono = leerCelda(row, 'Teléfono', 'Telefono', 'Celular', 'Movil', 'Móvil') ?? registro?.telefono ?? null;
+            const municipio = leerCelda(row, 'Municipio', 'Ciudad', 'Ubicacion', 'Ubicación') ?? registro?.municipio ?? null;
+            const articulo = String(leerCelda(row, 'Artículo', 'Articulo', 'Producto') ?? registro?.articulo ?? '').trim();
+
+            const fechaInicioRaw = leerCelda(row, ...ALIAS_FECHA_INICIO);
+            const montoCuota = numeroCelda(registro?.montoCuota, 'Monto Cuota', 'MontoCuota', 'Cuota', 'Valor Cuota');
+            const periodosPago = String(
+              leerCelda(row, 'Periodos Pago', 'PeriodosPago', 'Período', 'Periodo', 'Periodicidad', 'Frecuencia') ??
+                registro?.periodosPago ?? 'MENSUAL'
+            );
+
+            const abono = numeroCelda(registro?.abono ?? 0, 'Abono', 'Abonos', 'Pagado');
+            const saldo = numeroCelda(registro?.saldo, 'Saldo', 'Saldo Actual', 'Deuda');
+            if (registro && abono < registro.abono && aceptarAjustes !== 'true') {
+              throw new Error(`Credito ${numero}: el abono acumulado disminuye de ${registro.abono} a ${abono}. Revisa el archivo o habilita los ajustes`);
+            }
+            const fechaCorteAbono = leerCelda(row, 'Abono', 'Abonos', 'Pagado') !== undefined ? fechaCorte : registro?.fechaCorteAbono ?? null;
+            const ultimaImportacionEn = new Date().toISOString();
+            const ultimaFechaAbonoRaw = leerCelda(row, ...ALIAS_ULTIMA_FECHA_ABONO);
+
+            const fechaInicio = fechaCelda(fechaInicioRaw, registro?.fechaInicio ?? null);
+            const ultimaFechaAbono = fechaCelda(ultimaFechaAbonoRaw, registro?.ultimaFechaAbono ?? null);
+
+            const estado = String(leerCelda(row, 'Estado', 'Situacion', 'Situación') ?? registro?.estado ?? 'activo').trim().toLowerCase();
+            const diasMora = numeroCelda(registro?.diasMora ?? 0, 'Días Mora', 'Dias Mora', 'DiasMora', 'Mora');
+            if (!Number.isInteger(diasMora)) throw new Error(`Registro ${numero}: dias de mora invalidos`);
+
+            // Validar campos obligatorios
+            if (!cliente || !cedula || !vendedor || !articulo || !fechaInicio) {
+              throw new Error(`Registro ${numero}: faltan campos obligatorios`);
             }
 
-            const ultimaFechaAbonoNormalizada = ultimaFechaAbono ? ultimaFechaAbono.split('T')[0] : null;
-            const ultimaFechaAbonoExistenteNormalizada = registro.ultimaFechaAbono ? registro.ultimaFechaAbono.split('T')[0] : null;
-            if (ultimaFechaAbonoNormalizada !== ultimaFechaAbonoExistenteNormalizada) {
-              cambios.push({ campo: 'ultimaFechaAbono', anterior: registro.ultimaFechaAbono, nuevo: ultimaFechaAbono });
-            }
+            if (!registro) {
+              // Insertar nuevo
+              const [insertado] = await tx.insert(carteraClientes).values({
+                numero,
+                vendedor,
+                cliente,
+                cedula,
+                telefono: telefono ? String(telefono) : null,
+                municipio: municipio ? String(municipio) : null,
+                articulo,
+                fechaInicio,
+                montoCuota,
+                periodosPago,
+                abono,
+                saldo,
+                ultimaFechaAbono,
+                fechaCorteExcel: fechaCorte, fechaCorteAbono, ultimaImportacionEn,
+                estado,
+                diasMora,
+              }).returning();
 
-            if (cambios.length > 0) {
-              // Actualizar
-              await db
-                .update(carteraClientes)
-                .set({
-                  saldo,
-                  abono,
-                  diasMora,
-                  estado,
-                  telefono: telefono ? String(telefono) : null,
-                  fechaInicio,
-                  ultimaFechaAbono,
-                  actualizadoEn: new Date().toISOString(),
-                })
-                .where(eq(carteraClientes.id, registro.id));
+              await tx.insert(carteraCambios).values({
+                carteraClienteId: insertado.id,
+                tipoOperacion: 'insert',
+                campoModificado: 'all',
+                valorAnterior: null,
+                valorNuevo: JSON.stringify({ cliente, cedula, saldo, abono }),
+                archivoOrigen: data.filename,
+                usuarioId: request.usuario.id,
+              });
+              await tx.update(importacionesCrm).set({ nuevos: sql`${importacionesCrm.nuevos} + 1` }).where(eq(importacionesCrm.id, importacion.id));
 
-              // Registrar cada cambio
-              for (const cambio of cambios) {
-                await db.insert(carteraCambios).values({
-                  carteraClienteId: registro.id,
-                  tipoOperacion: 'update',
-                  campoModificado: cambio.campo,
-                  valorAnterior: String(cambio.anterior),
-                  valorNuevo: String(cambio.nuevo),
-                  archivoOrigen: data.filename,
-                  usuarioId: request.usuario.id,
-                });
+              return 'nuevo';
+            } else {
+              await tx.update(importacionesCrm).set({
+                comparados: sql`${importacionesCrm.comparados} + 1`,
+                saldoAnterior: sql`${importacionesCrm.saldoAnterior} + ${registro.saldo}`,
+                saldoNuevo: sql`${importacionesCrm.saldoNuevo} + ${saldo}`,
+                abonoAnterior: sql`${importacionesCrm.abonoAnterior} + ${registro.abono}`,
+                abonoNuevo: sql`${importacionesCrm.abonoNuevo} + ${abono}`,
+              }).where(eq(importacionesCrm.id, importacion.id));
+              // Detectar cambios
+              const cambios: Array<{ campo: string; anterior: any; nuevo: any }> = [];
+
+              if (registro.saldo !== saldo) cambios.push({ campo: 'saldo', anterior: registro.saldo, nuevo: saldo });
+              if (registro.abono !== abono) cambios.push({ campo: 'abono', anterior: registro.abono, nuevo: abono });
+              if (registro.montoCuota !== montoCuota) cambios.push({ campo: 'montoCuota', anterior: registro.montoCuota, nuevo: montoCuota });
+              if (registro.periodosPago !== periodosPago) cambios.push({ campo: 'periodosPago', anterior: registro.periodosPago, nuevo: periodosPago });
+              if (registro.diasMora !== diasMora) cambios.push({ campo: 'diasMora', anterior: registro.diasMora, nuevo: diasMora });
+              if (registro.estado !== estado) cambios.push({ campo: 'estado', anterior: registro.estado, nuevo: estado });
+              if (registro.telefono !== (telefono ? String(telefono) : null)) {
+                cambios.push({ campo: 'telefono', anterior: registro.telefono, nuevo: telefono });
               }
 
-              actualizados++;
-            } else {
-              sinCambios++;
+              // Detectar cambios en fechas
+              const fechaInicioNormalizada = fechaInicio.split('T')[0];
+              const fechaInicioExistenteNormalizada = registro.fechaInicio ? registro.fechaInicio.split('T')[0] : null;
+              if (fechaInicioExistenteNormalizada !== fechaInicioNormalizada) {
+                cambios.push({ campo: 'fechaInicio', anterior: registro.fechaInicio, nuevo: fechaInicio });
+              }
+
+              const ultimaFechaAbonoNormalizada = ultimaFechaAbono ? ultimaFechaAbono.split('T')[0] : null;
+              const ultimaFechaAbonoExistenteNormalizada = registro.ultimaFechaAbono ? registro.ultimaFechaAbono.split('T')[0] : null;
+              if (ultimaFechaAbonoNormalizada !== ultimaFechaAbonoExistenteNormalizada) {
+                cambios.push({ campo: 'ultimaFechaAbono', anterior: registro.ultimaFechaAbono, nuevo: ultimaFechaAbono });
+              }
+
+              if (cambios.length > 0) {
+                // Actualizar
+                await tx
+                  .update(carteraClientes)
+                  .set({
+                    saldo,
+                    abono,
+                    montoCuota,
+                    periodosPago,
+                    diasMora,
+                    estado,
+                    telefono: telefono ? String(telefono) : null,
+                    fechaInicio,
+                    ultimaFechaAbono,
+                    fechaCorteExcel: fechaCorte, fechaCorteAbono, ultimaImportacionEn,
+                    actualizadoEn: new Date().toISOString(),
+                  })
+                  .where(eq(carteraClientes.id, registro.id));
+
+                // Registrar cada cambio
+                for (const cambio of cambios) {
+                  await tx.insert(carteraCambios).values({
+                    carteraClienteId: registro.id,
+                    tipoOperacion: 'update',
+                    campoModificado: cambio.campo,
+                    valorAnterior: String(cambio.anterior),
+                    valorNuevo: String(cambio.nuevo),
+                    archivoOrigen: data.filename,
+                    usuarioId: request.usuario.id,
+                  });
+                }
+
+                return 'actualizado';
+              } else {
+                await tx.update(carteraClientes).set({ fechaCorteExcel: fechaCorte, fechaCorteAbono, ultimaImportacionEn })
+                  .where(eq(carteraClientes.id, registro.id));
+                return 'sinCambios';
+              }
             }
-          }
+          });
+          if (resultado === 'nuevo') nuevos++;
+          else if (resultado === 'actualizado') actualizados++;
+          else sinCambios++;
         } catch (error: any) {
           errores.push(`Error en fila ${JSON.stringify(row)}: ${error.message}`);
         }
       }
 
-      // Si una columna de fecha no coincidió con ningún encabezado, el valor se
-      // guardaría como NULL sin aviso. Lo reportamos junto con los encabezados
-      // encontrados para que el problema sea visible al subir el archivo.
+      // Avisar de columnas ausentes aunque se conserven los valores anteriores.
       const advertencias: string[] = [];
       const columnasEncontradas = [...indiceEncabezados.values()];
 
@@ -505,7 +552,10 @@ export const rutasCrm: FastifyPluginAsync = async (fastify) => {
         );
       }
 
+      const [resumenImportacion] = await db.update(importacionesCrm).set({ nuevos, actualizados, sinCambios,
+        errores: errores.length, finalizadaEn: new Date().toISOString() }).where(eq(importacionesCrm.id, importacion.id)).returning();
       return {
+        importacion: resumenImportacion,
         procesamiento: {
           nuevos,
           actualizados,
@@ -528,14 +578,14 @@ export const rutasCrm: FastifyPluginAsync = async (fastify) => {
   /**
    * GET /api/admin/crm/gestiones/pendientes
    *
-   * Clientes con seguimiento programado para hoy.
+   * Seguimientos sin cerrar, vencidos o programados para hoy en Colombia.
    */
   fastify.get('/gestiones/pendientes', async (request, reply) => {
     if (!request.usuario || request.usuario.rol !== 'admin') {
       return reply.code(403).send({ error: 'No autorizado' });
     }
 
-    const hoy = new Date().toISOString().split('T')[0];
+    const hoy = hoyColombia();
 
     const pendientes = await db
       .select({
@@ -557,13 +607,16 @@ export const rutasCrm: FastifyPluginAsync = async (fastify) => {
         ultimaGestion: sql<string | null>`(
           SELECT MAX(fecha_gestion)
           FROM gestiones_cobro
-          WHERE cartera_cliente_id = ${carteraClientes.id}
+          WHERE cartera_cliente_id = cartera_clientes.id
         )`,
       })
       .from(gestionesCobro)
       .innerJoin(carteraClientes, eq(gestionesCobro.carteraClienteId, carteraClientes.id))
-      .where(sql`DATE(${gestionesCobro.fechaProximaAccion}) = ${hoy}`)
-      .orderBy(desc(carteraClientes.diasMora));
+      .where(and(
+        sql`DATE(${gestionesCobro.fechaProximaAccion}) <= ${hoy}`,
+        sql`${gestionesCobro.seguimientoCerradoEn} IS NULL`
+      ))
+      .orderBy(asc(gestionesCobro.fechaProximaAccion), desc(carteraClientes.diasMora));
 
     // Transformar para que coincida con la estructura esperada en el frontend
     const gestiones = pendientes.map(p => ({
@@ -590,6 +643,28 @@ export const rutasCrm: FastifyPluginAsync = async (fastify) => {
     }));
 
     return { gestiones };
+  });
+
+  fastify.patch('/gestiones/:id/seguimiento', async (request, reply) => {
+    if (!request.usuario || request.usuario.rol !== 'admin') {
+      return reply.code(403).send({ error: 'No autorizado' });
+    }
+    const parametros = z.object({ id: z.string().uuid() }).safeParse(request.params);
+    const datos = z.object({ cerrado: z.boolean() }).safeParse(request.body);
+    if (!parametros.success || !datos.success) {
+      return reply.code(400).send({ error: 'Datos de seguimiento invalidos' });
+    }
+    const [gestion] = await db.update(gestionesCobro).set({
+      seguimientoCerradoEn: datos.data.cerrado
+        ? sql`COALESCE(${gestionesCobro.seguimientoCerradoEn}, ${new Date().toISOString()})` : null,
+      seguimientoCerradoPor: datos.data.cerrado
+        ? sql`COALESCE(${gestionesCobro.seguimientoCerradoPor}, ${request.usuario.id})` : null,
+    }).where(and(
+      eq(gestionesCobro.id, parametros.data.id),
+      sql`DATE(${gestionesCobro.fechaProximaAccion}) IS NOT NULL`
+    )).returning();
+    if (!gestion) return reply.code(404).send({ error: 'Seguimiento no encontrado' });
+    return { gestion };
   });
 
   /**
@@ -620,12 +695,12 @@ export const rutasCrm: FastifyPluginAsync = async (fastify) => {
         ultimaGestion: sql<string | null>`(
           SELECT MAX(fecha_gestion)
           FROM gestiones_cobro
-          WHERE cartera_cliente_id = ${carteraClientes.id}
+          WHERE cartera_cliente_id = cartera_clientes.id
         )`,
         totalGestiones: sql<number>`(
           SELECT COUNT(*)
           FROM gestiones_cobro
-          WHERE cartera_cliente_id = ${carteraClientes.id}
+          WHERE cartera_cliente_id = cartera_clientes.id
         )`,
       })
       .from(carteraClientes)
@@ -633,7 +708,8 @@ export const rutasCrm: FastifyPluginAsync = async (fastify) => {
         and(
           sql`${carteraClientes.diasMora} > 30`,
           sql`${carteraClientes.saldo} > 200000`,
-          sql`${carteraClientes.estado} != 'cancelado'`
+          sql`${carteraClientes.estado} != 'cancelado'`,
+          sql`NOT EXISTS (SELECT 1 FROM gestiones_cobro g WHERE g.cartera_cliente_id = cartera_clientes.id AND g.fecha_gestion >= ${hace7Dias.toISOString()})`
         )
       )
       .orderBy(desc(carteraClientes.diasMora), desc(carteraClientes.saldo))
@@ -669,7 +745,7 @@ export const rutasCrm: FastifyPluginAsync = async (fastify) => {
       return reply.code(403).send({ error: 'No autorizado' });
     }
 
-    const hoy = new Date().toISOString().split('T')[0];
+    const hoy = hoyColombia();
 
     const recientes = await db
       .select({
@@ -692,12 +768,12 @@ export const rutasCrm: FastifyPluginAsync = async (fastify) => {
         ultimaGestion: sql<string | null>`(
           SELECT MAX(fecha_gestion)
           FROM gestiones_cobro
-          WHERE cartera_cliente_id = ${carteraClientes.id}
+          WHERE cartera_cliente_id = cartera_clientes.id
         )`,
       })
       .from(gestionesCobro)
       .innerJoin(carteraClientes, eq(gestionesCobro.carteraClienteId, carteraClientes.id))
-      .where(sql`DATE(${gestionesCobro.fechaGestion}) = ${hoy}`)
+      .where(sql`DATE(${gestionesCobro.fechaGestion}, '-5 hours') = ${hoy}`)
       .orderBy(desc(gestionesCobro.fechaGestion));
 
     // Transformar para que coincida con la estructura esperada
@@ -1367,4 +1443,5 @@ export const rutasCrm: FastifyPluginAsync = async (fastify) => {
   // Importar y registrar las rutas de etiquetas y grupos
   const { rutasEtiquetasGrupos } = await import('./crm-etiquetas.js');
   await rutasEtiquetasGrupos(fastify);
+  await fastify.register(rutasCrmOperativo);
 };

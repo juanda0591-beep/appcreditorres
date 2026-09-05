@@ -2,8 +2,9 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { db } from '../db/cliente.js';
 import { etiquetasCartera, clienteEtiquetas, gruposGestion, clientesGrupo } from '../db/esquema/crm-etiquetas.js';
-import { carteraClientes } from '../db/esquema/crm.js';
+import { carteraClientes, gestionesCobro } from '../db/esquema/crm.js';
 import { eq, and, sql, desc, asc, inArray } from 'drizzle-orm';
+import { crearPromesaCrm } from './crm-operativo.js';
 
 export async function rutasEtiquetasGrupos(fastify: FastifyInstance) {
 
@@ -318,40 +319,57 @@ export async function rutasEtiquetasGrupos(fastify: FastifyInstance) {
       gestionado: z.boolean(),
       resultado: z.string().optional(),
       notas: z.string().optional(),
+      montoPromesa: z.number().positive().optional(),
+      fechaPromesa: z.string().optional(),
     });
 
-    const datos = schema.parse(request.body);
-
-    const [actualizado] = await db
-      .update(clientesGrupo)
-      .set({
+    const validacion = schema.safeParse(request.body);
+    if (!validacion.success || (validacion.data.gestionado && !validacion.data.resultado?.trim())) {
+      return reply.code(400).send({ error: 'Selecciona el resultado de la gestion' });
+    }
+    const datos = validacion.data;
+    const actualizado = await db.transaction(async (tx) => {
+      const [grupo] = await tx.select().from(gruposGestion)
+        .where(eq(gruposGestion.id, grupoId)).limit(1);
+      const condicion = and(eq(clientesGrupo.id, clienteGrupoId), eq(clientesGrupo.grupoId, grupoId));
+      const [anterior] = await tx.select().from(clientesGrupo).where(condicion).limit(1);
+      if (!grupo || !anterior) return null;
+      // Reintentar la misma transicion no debe crear otra gestion ni cambiar su fecha.
+      if (anterior.gestionado === datos.gestionado) return anterior;
+      const ahora = new Date().toISOString();
+      const [cliente] = await tx.update(clientesGrupo).set({
         gestionado: datos.gestionado,
-        fechaGestion: datos.gestionado ? new Date().toISOString() : null,
+        fechaGestion: datos.gestionado ? ahora : null,
         resultado: datos.resultado,
         notas: datos.notas,
-        actualizadoEn: new Date().toISOString(),
-      })
-      .where(eq(clientesGrupo.id, clienteGrupoId))
-      .returning();
+        actualizadoEn: ahora,
+      }).where(condicion).returning();
 
-    // Recalcular contador de gestionados del grupo
-    const [conteo] = await db
-      .select({ total: sql<number>`COUNT(*)` })
-      .from(clientesGrupo)
-      .where(
-        and(
-          eq(clientesGrupo.grupoId, grupoId),
-          eq(clientesGrupo.gestionado, true)
-        )
-      );
-
-    await db
-      .update(gruposGestion)
-      .set({
+      if (datos.gestionado && datos.resultado === 'promesa_pago') {
+        await crearPromesaCrm(tx, cliente.carteraClienteId, { monto: datos.montoPromesa, fechaCompromiso: datos.fechaPromesa,
+          notas: [`Grupo: ${grupo.nombre}`, datos.notas?.trim()].filter(Boolean).join('\n') }, request.usuario!);
+      } else if (datos.gestionado) {
+        await tx.insert(gestionesCobro).values({
+          carteraClienteId: cliente.carteraClienteId,
+          fechaGestion: ahora,
+          tipoGestion: 'gestion_grupo',
+          canal: 'no_especificado',
+          resultado: datos.resultado!.trim(),
+          notas: [`Grupo: ${grupo.nombre}`, datos.notas?.trim()].filter(Boolean).join('\n'),
+          usuarioId: request.usuario!.id,
+          nombreUsuario: request.usuario!.nombre,
+        });
+      }
+      // Desmarcar reabre el trabajo del grupo, pero conserva el historial de contacto.
+      const [conteo] = await tx.select({ total: sql<number>`COUNT(*)` }).from(clientesGrupo)
+        .where(and(eq(clientesGrupo.grupoId, grupoId), eq(clientesGrupo.gestionado, true)));
+      await tx.update(gruposGestion).set({
         clientesGestionados: conteo.total,
-        actualizadoEn: new Date().toISOString(),
-      })
-      .where(eq(gruposGestion.id, grupoId));
+        actualizadoEn: ahora,
+      }).where(eq(gruposGestion.id, grupoId));
+      return cliente;
+    });
+    if (!actualizado) return reply.code(404).send({ error: 'Cliente no encontrado en el grupo' });
 
     return { cliente: actualizado };
   });

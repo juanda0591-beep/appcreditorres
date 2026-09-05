@@ -34,6 +34,8 @@ export default function CrmCartera() {
   const [cargando, setCargando] = useState(true);
   const [subiendoArchivo, setSubiendoArchivo] = useState(false);
   const [resultadoUpload, setResultadoUpload] = useState<any>(null);
+  const [fechaCorte, setFechaCorte] = useState(() => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date()));
+  const [aceptarAjustes, setAceptarAjustes] = useState(false);
 
   // Filtros
   const [estado, setEstado] = useState('');
@@ -113,7 +115,8 @@ export default function CrmCartera() {
       const formData = new FormData();
       formData.append('file', archivo);
 
-      const res = await fetch('/api/admin/crm/cartera/upload', {
+      const parametros = new URLSearchParams({ fechaCorte, aceptarAjustes: String(aceptarAjustes) });
+      const res = await fetch(`/api/admin/crm/cartera/upload?${parametros}`, {
         method: 'POST',
         body: formData,
       });
@@ -123,6 +126,8 @@ export default function CrmCartera() {
       if (res.ok) {
         setResultadoUpload(data);
         cargarCartera(); // Recargar la cartera
+        cargarVendedores();
+        cargarMunicipios();
       } else {
         alert(`Error: ${data.error}\n${JSON.stringify(data.detalles || data, null, 2)}`);
       }
@@ -250,26 +255,32 @@ export default function CrmCartera() {
       {/* Upload Excel */}
       <div className="bg-white rounded-lg shadow p-6 mb-6 mx-6">
         <h2 className="text-xl font-semibold mb-4">Subir archivo Excel de cartera</h2>
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-end gap-4">
+          <label className="text-sm font-medium">Fecha de corte del archivo
+            <input type="date" value={fechaCorte} onChange={e => setFechaCorte(e.target.value)} disabled={subiendoArchivo}
+              max={new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date())}
+              className="block border rounded px-3 py-2 mt-1" required />
+          </label>
           <label className="cursor-pointer px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
             {subiendoArchivo ? 'Procesando...' : 'Seleccionar archivo Excel'}
             <input
               type="file"
               accept=".xlsx,.xls"
               onChange={handleUploadExcel}
-              disabled={subiendoArchivo}
+              disabled={subiendoArchivo || !fechaCorte}
               className="hidden"
             />
           </label>
-          <span className="text-sm text-gray-600">
-            El sistema detectará automáticamente cambios y actualizará la cartera
-          </span>
+          <label className="flex items-center gap-2 text-sm py-2">
+            <input type="checkbox" checked={aceptarAjustes} onChange={e => setAceptarAjustes(e.target.checked)} disabled={subiendoArchivo} />
+            Autorizar disminuciones del abono acumulado
+          </label>
         </div>
 
         {resultadoUpload && (
           <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded">
             <h3 className="font-semibold text-green-800 mb-2">
-              ✓ Archivo procesado exitosamente
+              {resultadoUpload.procesamiento.errores ? 'Archivo procesado con observaciones' : 'Archivo procesado'}
             </h3>
             <div className="grid grid-cols-3 gap-4 text-sm">
               <div>
@@ -285,6 +296,15 @@ export default function CrmCartera() {
                 {resultadoUpload.procesamiento.sinCambios}
               </div>
             </div>
+            {resultadoUpload.importacion && (
+              <p className="mt-3 text-sm">Creditos comparados: {resultadoUpload.importacion.comparados} · Variacion de abonos: {formatearPesos(resultadoUpload.importacion.abonoNuevo - resultadoUpload.importacion.abonoAnterior)}</p>
+            )}
+            {resultadoUpload.detalles && (
+              <div role="alert" className="mt-3 text-sm text-red-800">
+                <p className="font-semibold">Filas sin aplicar: {resultadoUpload.procesamiento.errores}</p>
+                <ul className="list-disc pl-5">{resultadoUpload.detalles.map((detalle: string, i: number) => <li key={i} className="break-words">{detalle}</li>)}</ul>
+              </div>
+            )}
 
             {resultadoUpload.advertencias && (
               <div className="mt-3 p-3 bg-amber-50 border border-amber-300 rounded text-sm text-amber-900">

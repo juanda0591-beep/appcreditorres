@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft, Check, X, MessageSquare, Phone, Mail } from 'lucide-react';
+import { toast } from 'sonner';
 
 interface ClienteGrupo {
   clienteGrupoId: string;
@@ -41,6 +42,9 @@ export default function CrmGrupoDetalle() {
   const [cargando, setCargando] = useState(true);
   const [clienteSeleccionado, setClienteSeleccionado] = useState<ClienteGrupo | null>(null);
   const [modalGestion, setModalGestion] = useState(false);
+  const [guardandoGestion, setGuardandoGestion] = useState(false);
+  const [montoPromesa, setMontoPromesa] = useState('');
+  const [fechaPromesa, setFechaPromesa] = useState('');
   const [formGestion, setFormGestion] = useState({
     resultado: '',
     notas: '',
@@ -77,6 +81,8 @@ export default function CrmGrupoDetalle() {
       // Abrir modal para capturar resultado y notas
       setClienteSeleccionado(clienteGrupo);
       setFormGestion({ resultado: '', notas: '' });
+      setMontoPromesa('');
+      setFechaPromesa('');
       setModalGestion(true);
     } else {
       // Desmarcar directamente
@@ -90,13 +96,16 @@ export default function CrmGrupoDetalle() {
     resultado: string,
     notas: string
   ) {
+    if (guardandoGestion) return;
+    setGuardandoGestion(true);
     try {
       const res = await fetch(
         `/api/admin/crm/grupos/${grupoId}/clientes/${clienteGrupoId}`,
         {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ gestionado, resultado, notas }),
+          body: JSON.stringify({ gestionado, resultado, notas,
+            ...(gestionado && resultado === 'promesa_pago' ? { montoPromesa: Number(montoPromesa), fechaPromesa } : {}) }),
         }
       );
 
@@ -104,9 +113,15 @@ export default function CrmGrupoDetalle() {
         setModalGestion(false);
         setClienteSeleccionado(null);
         cargarGrupo();
+      } else {
+        const error = await res.json();
+        toast.error(error.mensaje || error.error || 'No se pudo guardar la gestion');
       }
     } catch (error) {
       console.error('Error al actualizar cliente:', error);
+      toast.error('No se pudo guardar la gestion');
+    } finally {
+      setGuardandoGestion(false);
     }
   }
 
@@ -377,6 +392,7 @@ export default function CrmGrupoDetalle() {
                       onClick={() => marcarGestionado(cliente, false)}
                       className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded"
                       title="Desmarcar"
+                      disabled={guardandoGestion}
                     >
                       <X className="w-4 h-4" />
                     </button>
@@ -391,13 +407,17 @@ export default function CrmGrupoDetalle() {
       {/* Modal registrar gestión */}
       {modalGestion && clienteSeleccionado && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md mx-3 max-h-[90vh] overflow-y-auto">
             <h2 className="text-xl font-bold mb-4">Registrar Gestión</h2>
             <p className="text-gray-600 mb-4">
               Cliente: <span className="font-medium">{clienteSeleccionado.cliente}</span>
             </p>
 
             <div className="space-y-4">
+              {formGestion.resultado === 'promesa_pago' && <div className="grid gap-3">
+                <label className="text-sm">Monto prometido (COP)<input type="number" min="1" step="1" value={montoPromesa} onChange={e => setMontoPromesa(e.target.value)} className="block w-full mt-1 border rounded px-3 py-2" /></label>
+                <label className="text-sm">Fecha de compromiso<input type="date" value={fechaPromesa} onChange={e => setFechaPromesa(e.target.value)} className="block w-full mt-1 border rounded px-3 py-2" /></label>
+              </div>}
               <div>
                 <label className="block text-sm font-medium mb-1">Resultado</label>
                 <select
@@ -451,6 +471,7 @@ export default function CrmGrupoDetalle() {
                   )
                 }
                 className="flex-1 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+                disabled={guardandoGestion || !formGestion.resultado || (formGestion.resultado === 'promesa_pago' && (!montoPromesa || !fechaPromesa))}
               >
                 Guardar
               </button>

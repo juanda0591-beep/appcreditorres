@@ -1,4 +1,5 @@
-import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real, index, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 
 const idPorDefecto = () => randomUUID();
@@ -30,6 +31,9 @@ export const carteraClientes = sqliteTable('cartera_clientes', {
   abono: real('abono').notNull().default(0),
   saldo: real('saldo').notNull(),
   ultimaFechaAbono: text('ultima_fecha_abono'), // ISO date string
+  fechaCorteExcel: text('fecha_corte_excel'),
+  fechaCorteAbono: text('fecha_corte_abono'),
+  ultimaImportacionEn: text('ultima_importacion_en'),
 
   // Estado del crédito
   estado: text('estado').notNull().default('activo'), // activo, al_dia, mora, cancelado, refinanciado
@@ -61,6 +65,8 @@ export const gestionesCobro = sqliteTable('gestiones_cobro', {
   // Seguimiento
   proximaAccion: text('proxima_accion'), // Qué hacer después
   fechaProximaAccion: text('fecha_proxima_accion'), // Cuándo hacer seguimiento
+  seguimientoCerradoEn: text('seguimiento_cerrado_en'),
+  seguimientoCerradoPor: text('seguimiento_cerrado_por'),
 
   // Usuario que realizó la gestión
   usuarioId: text('usuario_id').notNull(),
@@ -175,4 +181,65 @@ export const plantillasCobranza = sqliteTable('plantillas_cobranza', {
 
   creadoEn: text('creado_en').notNull().$defaultFn(() => new Date().toISOString()),
   actualizadoEn: text('actualizado_en').notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+export const contactosCrm = sqliteTable('contactos_crm', {
+  documento: text('documento').primaryKey(),
+  version: integer('version').notNull().default(1),
+  responsableId: text('responsable_id'),
+  estadoUbicacion: text('estado_ubicacion').notNull().default('por_confirmar'),
+  direccionAnterior: text('direccion_anterior').notNull().default(''),
+  direccionActual: text('direccion_actual').notNull().default(''),
+  barrio: text('barrio').notNull().default(''),
+  municipio: text('municipio').notNull().default(''),
+  referencias: text('referencias').notNull().default(''),
+  telefonoAlternativo: text('telefono_alternativo').notNull().default(''),
+  verificadoEn: text('verificado_en'),
+  actualizadoEn: text('actualizado_en').notNull().$defaultFn(ahora),
+});
+
+export const cambiosContactoCrm = sqliteTable('cambios_contacto_crm', {
+  id: text('id').primaryKey().$defaultFn(idPorDefecto),
+  documento: text('documento').notNull(),
+  anterior: text('anterior'),
+  nuevo: text('nuevo').notNull(),
+  usuarioId: text('usuario_id').notNull(),
+  nombreUsuario: text('nombre_usuario').notNull(),
+  creadoEn: text('creado_en').notNull().$defaultFn(ahora),
+}, tabla => [index('idx_contacto_cambios_documento').on(tabla.documento, tabla.creadoEn)]);
+
+export const promesasCrm = sqliteTable('promesas_crm', {
+  id: text('id').primaryKey().$defaultFn(idPorDefecto),
+  carteraClienteId: text('cartera_cliente_id').notNull().references(() => carteraClientes.id, { onDelete: 'cascade' }),
+  gestionId: text('gestion_id').references(() => gestionesCobro.id, { onDelete: 'set null' }),
+  monto: real('monto').notNull(),
+  fechaCompromiso: text('fecha_compromiso').notNull(),
+  estado: text('estado').notNull().default('pendiente'),
+  abonoBase: real('abono_base').notNull(),
+  responsableId: text('responsable_id').notNull(),
+  responsableNombre: text('responsable_nombre').notNull(),
+  notas: text('notas').notNull().default(''),
+  resolucion: text('resolucion'),
+  resueltaEn: text('resuelta_en'),
+  creadoEn: text('creado_en').notNull().$defaultFn(ahora),
+  actualizadoEn: text('actualizado_en').notNull().$defaultFn(ahora),
+}, tabla => [index('idx_promesas_estado_fecha').on(tabla.estado, tabla.fechaCompromiso),
+  uniqueIndex('uq_promesa_abierta_credito').on(tabla.carteraClienteId).where(sql`${tabla.estado} IN ('pendiente', 'parcial')`)]);
+
+export const importacionesCrm = sqliteTable('importaciones_crm', {
+  id: text('id').primaryKey().$defaultFn(idPorDefecto),
+  archivo: text('archivo').notNull(),
+  fechaCorte: text('fecha_corte').notNull(),
+  usuarioId: text('usuario_id').notNull(),
+  nuevos: integer('nuevos').notNull().default(0),
+  actualizados: integer('actualizados').notNull().default(0),
+  sinCambios: integer('sin_cambios').notNull().default(0),
+  errores: integer('errores').notNull().default(0),
+  comparados: integer('comparados').notNull().default(0),
+  saldoAnterior: real('saldo_anterior').notNull().default(0),
+  saldoNuevo: real('saldo_nuevo').notNull().default(0),
+  abonoAnterior: real('abono_anterior').notNull().default(0),
+  abonoNuevo: real('abono_nuevo').notNull().default(0),
+  finalizadaEn: text('finalizada_en'),
+  creadoEn: text('creado_en').notNull().$defaultFn(ahora),
 });

@@ -1,5 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import { Check, RotateCcw } from 'lucide-react';
+import { toast } from 'sonner';
+import { CrmFichaSeguimiento } from '../componentes/CrmFichaSeguimiento';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface Cliente {
   id: string;
@@ -29,6 +33,7 @@ interface Gestion {
   notas: string | null;
   proximaAccion: string | null;
   fechaProximaAccion: string | null;
+  seguimientoCerradoEn: string | null;
   nombreUsuario: string;
 }
 
@@ -52,12 +57,18 @@ interface Cambio {
 }
 
 export default function CrmDetalleCliente() {
+  const cache = useQueryClient();
+  const [montoPromesa, setMontoPromesa] = useState('');
+  const [guardandoGestion, setGuardandoGestion] = useState(false);
   const { id } = useParams<{ id: string }>();
+  const idActual = useRef(id);
+  idActual.current = id;
   const [cliente, setCliente] = useState<Cliente | null>(null);
   const [gestiones, setGestiones] = useState<Gestion[]>([]);
   const [pagos, setPagos] = useState<Pago[]>([]);
   const [cambios, setCambios] = useState<Cambio[]>([]);
   const [cargando, setCargando] = useState(true);
+  const [guardandoSeguimiento, setGuardandoSeguimiento] = useState<string | null>(null);
   const [vistaActiva, setVistaActiva] = useState<'gestiones' | 'pagos' | 'cambios'>('gestiones');
 
   // Modal de gestión
@@ -70,18 +81,22 @@ export default function CrmDetalleCliente() {
     proximaAccion: '',
     fechaProximaAccion: '',
   });
+  const esPromesa = formGestion.tipoGestion === 'promesa_pago' || formGestion.resultado === 'promesa_pago';
 
   useEffect(() => {
     if (id) {
+      setModalGestionAbierto(false);
       cargarDatos();
     }
   }, [id]);
 
-  async function cargarDatos() {
-    setCargando(true);
+  async function cargarDatos(mostrarCarga = true) {
+    if (mostrarCarga) setCargando(true);
     try {
       const res = await fetch(`/api/admin/crm/cartera/${id}/historial`);
+      if (!res.ok) throw new Error('No se pudo cargar la ficha');
       const data = await res.json();
+      if (idActual.current !== id) return;
 
       setCliente(data.cliente);
       setGestiones(data.gestiones || []);
@@ -89,19 +104,39 @@ export default function CrmDetalleCliente() {
       setCambios(data.cambios || []);
     } catch (error) {
       console.error('Error al cargar datos:', error);
+      if (idActual.current === id) setCliente(null);
     } finally {
-      setCargando(false);
+      if (idActual.current === id) setCargando(false);
+    }
+  }
+
+  async function cambiarSeguimiento(gestion: Gestion) {
+    setGuardandoSeguimiento(gestion.id);
+    try {
+      const res = await fetch(`/api/admin/crm/gestiones/${gestion.id}/seguimiento`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cerrado: !gestion.seguimientoCerradoEn }),
+      });
+      if (!res.ok) throw new Error('No se pudo actualizar el seguimiento');
+      const data = await res.json();
+      setGestiones(actuales => actuales.map(actual => actual.id === gestion.id ? data.gestion : actual));
+    } catch {
+      toast.error('No se pudo actualizar el seguimiento');
+    } finally {
+      setGuardandoSeguimiento(null);
     }
   }
 
   async function registrarGestion(e: React.FormEvent) {
     e.preventDefault();
-
+    if (guardandoGestion) return;
+    setGuardandoGestion(true);
     try {
-      const res = await fetch('/api/admin/crm/gestiones', {
+      const res = await fetch(esPromesa ? `/api/admin/crm/cartera/${id}/promesas` : '/api/admin/crm/gestiones', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: JSON.stringify(esPromesa ? { monto: Number(montoPromesa), fechaCompromiso: formGestion.fechaProximaAccion, notas: formGestion.notas, canal: formGestion.canal } : {
           carteraClienteId: id,
           ...formGestion,
         }),
@@ -110,14 +145,17 @@ export default function CrmDetalleCliente() {
       if (res.ok) {
         alert('Gestión registrada exitosamente');
         setModalGestionAbierto(false);
+        void cache.invalidateQueries({ queryKey: ['crm'] });
         cargarDatos();
       } else {
         const error = await res.json();
-        alert(`Error: ${error.error}`);
+        alert(`Error: ${error.mensaje ?? error.error}`);
       }
     } catch (error) {
       console.error('Error al registrar gestión:', error);
       alert('Error al registrar gestión');
+    } finally {
+      setGuardandoGestion(false);
     }
   }
 
@@ -173,8 +211,8 @@ export default function CrmDetalleCliente() {
         <Link to="/crm/cartera" className="text-blue-600 hover:text-blue-800 text-sm mb-2 inline-block">
           ← Volver a Cartera
         </Link>
-        <div className="flex justify-between items-start">
-          <div>
+        <div className="flex flex-wrap gap-4 justify-between items-start">
+          <div className="min-w-0 break-words">
             <h1 className="text-3xl font-bold">{cliente.cliente}</h1>
             <div className="mt-2 text-gray-600 space-y-1">
               <p>Crédito #{cliente.numero} • Cédula: {cliente.cedula}</p>
@@ -185,7 +223,7 @@ export default function CrmDetalleCliente() {
           </div>
           <div className="flex gap-2">
             <button
-              onClick={() => setModalGestionAbierto(true)}
+              onClick={() => { setMontoPromesa(''); setModalGestionAbierto(true); }}
               className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
             >
               Nueva Gestión
@@ -195,7 +233,7 @@ export default function CrmDetalleCliente() {
       </div>
 
       {/* Información del Crédito */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <div className="bg-white rounded-lg shadow p-4">
           <div className="text-sm text-gray-600 mb-1">Saldo Actual</div>
           <div className="text-2xl font-bold text-red-600">{formatearPesos(cliente.saldo)}</div>
@@ -217,7 +255,7 @@ export default function CrmDetalleCliente() {
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         <div className="bg-white rounded-lg shadow p-4">
           <div className="text-sm text-gray-600 mb-1">Artículo</div>
           <div className="font-medium">{cliente.articulo}</div>
@@ -231,6 +269,8 @@ export default function CrmDetalleCliente() {
           <div className="font-medium">{formatearFecha(cliente.ultimaFechaAbono)}</div>
         </div>
       </div>
+
+      <CrmFichaSeguimiento key={id} creditoId={id!} onActualizado={() => cargarDatos(false)} />
 
       {/* Tabs */}
       <div className="bg-white rounded-lg shadow overflow-hidden">
@@ -281,11 +321,11 @@ export default function CrmDetalleCliente() {
                     <div className="flex justify-between items-start mb-2">
                       <div>
                         <span className="font-medium capitalize">
-                          {gestion.tipoGestion.replace(/_/g, ' ')}
+                          {gestion.tipoGestion === 'gestion_grupo' ? 'Gestión de grupo' : gestion.tipoGestion.replace(/_/g, ' ')}
                         </span>
-                        <span className="text-gray-500 text-sm ml-2">
-                          vía {gestion.canal}
-                        </span>
+                        {gestion.canal !== 'no_especificado' && (
+                          <span className="text-gray-500 text-sm ml-2">vía {gestion.canal}</span>
+                        )}
                       </div>
                       <div className="text-sm text-gray-500">
                         {formatearFechaHora(gestion.fechaGestion)}
@@ -298,13 +338,27 @@ export default function CrmDetalleCliente() {
                     {gestion.notas && (
                       <div className="text-sm text-gray-700 mb-2">{gestion.notas}</div>
                     )}
-                    {gestion.proximaAccion && (
+                    {(gestion.proximaAccion || gestion.fechaProximaAccion) && (
                       <div className="text-sm bg-blue-50 text-blue-800 p-2 rounded">
                         <span className="font-medium">Próxima acción:</span> {gestion.proximaAccion}
                         {gestion.fechaProximaAccion && (
                           <span className="ml-2">
                             ({formatearFecha(gestion.fechaProximaAccion)})
                           </span>
+                        )}
+                        {gestion.fechaProximaAccion && (
+                          <div className="mt-2 flex flex-wrap items-center gap-3">
+                            <span>{gestion.seguimientoCerradoEn ? 'Atendido' : 'Pendiente'}</span>
+                            <button
+                              onClick={() => cambiarSeguimiento(gestion)}
+                              disabled={guardandoSeguimiento !== null}
+                              title={gestion.seguimientoCerradoEn ? 'Reabrir seguimiento' : 'Marcar seguimiento como atendido'}
+                              className="inline-flex items-center gap-1 border rounded px-2 py-1 disabled:opacity-50"
+                            >
+                              {gestion.seguimientoCerradoEn ? <RotateCcw size={14} /> : <Check size={14} />}
+                              {gestion.seguimientoCerradoEn ? 'Reabrir' : 'Atendido'}
+                            </button>
+                          </div>
                         )}
                       </div>
                     )}
@@ -393,7 +447,8 @@ export default function CrmDetalleCliente() {
               </p>
             </div>
 
-            <form onSubmit={registrarGestion} className="p-6">
+          <form onSubmit={registrarGestion} className="p-6">
+            {esPromesa && <label className="block text-sm font-medium mb-4">Monto prometido (COP)<input type="number" min="1" step="1" required value={montoPromesa} onChange={e => setMontoPromesa(e.target.value)} className="block mt-1 w-full border rounded px-3 py-2" /></label>}
               <div className="grid grid-cols-2 gap-4 mb-4">
                 <div>
                   <label className="block text-sm font-medium mb-1">Tipo de Gestión</label>
@@ -481,6 +536,7 @@ export default function CrmDetalleCliente() {
                 <input
                   type="date"
                   value={formGestion.fechaProximaAccion}
+                  required={esPromesa}
                   onChange={(e) =>
                     setFormGestion({ ...formGestion, fechaProximaAccion: e.target.value })
                   }
@@ -500,7 +556,7 @@ export default function CrmDetalleCliente() {
                   type="submit"
                   className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
                 >
-                  Registrar Gestión
+                  {guardandoGestion ? 'Guardando...' : esPromesa ? 'Registrar promesa' : 'Registrar Gestión'}
                 </button>
               </div>
             </form>

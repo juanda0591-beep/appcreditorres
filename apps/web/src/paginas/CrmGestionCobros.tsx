@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { MessageSquare } from 'lucide-react';
+import { Check, MessageSquare } from 'lucide-react';
+import { toast } from 'sonner';
+import { useQueryClient } from '@tanstack/react-query';
+import { CrmBandeja } from '../componentes/CrmBandeja';
 
 interface ClientePrioritario {
   cliente: {
@@ -38,12 +41,19 @@ interface GestionConCliente {
 }
 
 export default function CrmGestionCobros() {
+  const cache = useQueryClient();
+  const [vistaGeneral, setVistaGeneral] = useState('agenda');
   const [clientesPrioritarios, setClientesPrioritarios] = useState<ClientePrioritario[]>([]);
   const [gestionesPendientes, setGestionesPendientes] = useState<GestionConCliente[]>([]);
+  const [gestionesRecientes, setGestionesRecientes] = useState<GestionConCliente[]>([]);
+  const [cerrandoSeguimiento, setCerrandoSeguimiento] = useState<string | null>(null);
+  const [errorCarga, setErrorCarga] = useState('');
   const [cargando, setCargando] = useState(true);
 
   // Modal de gestión
   const [modalAbierto, setModalAbierto] = useState(false);
+  const [montoPromesa, setMontoPromesa] = useState('');
+  const [guardandoGestion, setGuardandoGestion] = useState(false);
   const [clienteSeleccionado, setClienteSeleccionado] = useState<any>(null);
   const [vistaModal, setVistaModal] = useState<'gestion' | 'whatsapp'>('gestion');
   const [formGestion, setFormGestion] = useState({
@@ -54,6 +64,7 @@ export default function CrmGestionCobros() {
     proximaAccion: '',
     fechaProximaAccion: '',
   });
+  const esPromesa = formGestion.tipoGestion === 'promesa_pago' || formGestion.resultado === 'promesa_pago';
 
   // WhatsApp
   const [whatsappConectado, setWhatsappConectado] = useState(false);
@@ -95,12 +106,16 @@ export default function CrmGestionCobros() {
 
   async function cargarDatos() {
     setCargando(true);
+    setErrorCarga('');
     try {
       const [resPrioritarios, resPendientes, resRecientes] = await Promise.all([
         fetch('/api/admin/crm/gestiones/prioritarios'),
         fetch('/api/admin/crm/gestiones/pendientes'),
         fetch('/api/admin/crm/gestiones/recientes'),
       ]);
+      if (![resPrioritarios, resPendientes, resRecientes].every(res => res.ok)) {
+        throw new Error('No se pudo cargar la gestion de cobros');
+      }
 
       const dataPrioritarios = await resPrioritarios.json();
       const dataPendientes = await resPendientes.json();
@@ -108,21 +123,38 @@ export default function CrmGestionCobros() {
 
       setClientesPrioritarios(dataPrioritarios.clientes || []);
 
-      // Combinar pendientes y recientes, eliminando duplicados
-      const todasGestiones = [...dataPendientes.gestiones || [], ...dataRecientes.gestiones || []];
-      const gestionesUnicas = Array.from(
-        new Map(todasGestiones.map(g => [g.gestion.id, g])).values()
-      );
-
-      setGestionesPendientes(gestionesUnicas);
+      setGestionesPendientes(dataPendientes.gestiones || []);
+      setGestionesRecientes(dataRecientes.gestiones || []);
+      void cache.invalidateQueries({ queryKey: ['crm', 'agenda'] });
     } catch (error) {
       console.error('Error al cargar datos:', error);
+      setErrorCarga('No se pudo cargar la gestion de cobros');
     } finally {
       setCargando(false);
     }
   }
 
+  async function cerrarSeguimiento(gestionId: string) {
+    setCerrandoSeguimiento(gestionId);
+    try {
+      const res = await fetch(`/api/admin/crm/gestiones/${gestionId}/seguimiento`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cerrado: true }),
+      });
+      if (!res.ok) throw new Error('No se pudo cerrar el seguimiento');
+      await cargarDatos();
+      toast.success('Seguimiento atendido');
+    } catch {
+      toast.error('No se pudo cerrar el seguimiento');
+    } finally {
+      setCerrandoSeguimiento(null);
+    }
+  }
+
   function abrirModalGestion(cliente: any) {
+    setMontoPromesa('');
+    setAnalisisIA(null);
     setClienteSeleccionado(cliente);
     setVistaModal('gestion');
     setFormGestion({
@@ -235,12 +267,13 @@ export default function CrmGestionCobros() {
 
   async function registrarGestion(e: React.FormEvent) {
     e.preventDefault();
-
+    if (guardandoGestion) return;
+    setGuardandoGestion(true);
     try {
-      const res = await fetch('/api/admin/crm/gestiones', {
+      const res = await fetch(esPromesa ? `/api/admin/crm/cartera/${clienteSeleccionado.id}/promesas` : '/api/admin/crm/gestiones', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: JSON.stringify(esPromesa ? { monto: Number(montoPromesa), fechaCompromiso: formGestion.fechaProximaAccion, notas: formGestion.notas, canal: formGestion.canal } : {
           carteraClienteId: clienteSeleccionado.id,
           ...formGestion,
         }),
@@ -252,11 +285,13 @@ export default function CrmGestionCobros() {
         cargarDatos();
       } else {
         const error = await res.json();
-        alert(`Error: ${error.error}`);
+        alert(`Error: ${error.mensaje ?? error.error}`);
       }
     } catch (error) {
       console.error('Error al registrar gestión:', error);
       alert('Error al registrar gestión');
+    } finally {
+      setGuardandoGestion(false);
     }
   }
 
@@ -323,7 +358,7 @@ export default function CrmGestionCobros() {
 
   return (
     <div className="p-6 max-w-[1400px] mx-auto">
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex flex-wrap gap-3 justify-between items-center mb-6">
         <h1 className="text-3xl font-bold">Gestión de Cobros</h1>
         <Link
           to="/crm/cartera"
@@ -333,8 +368,17 @@ export default function CrmGestionCobros() {
         </Link>
       </div>
 
-      {cargando ? (
+      <div role="tablist" aria-label="Gestion de cobros" className="flex gap-2 mb-5 border-b border-gray-200">
+        <button role="tab" aria-selected={vistaGeneral === 'agenda'} onClick={() => setVistaGeneral('agenda')} className={`px-4 py-3 border-b-2 ${vistaGeneral === 'agenda' ? 'border-teal-700 text-teal-800 font-semibold' : 'border-transparent'}`}>Agenda de cartera</button>
+        <button role="tab" aria-selected={vistaGeneral === 'gestiones'} onClick={() => setVistaGeneral('gestiones')} className={`px-4 py-3 border-b-2 ${vistaGeneral === 'gestiones' ? 'border-teal-700 text-teal-800 font-semibold' : 'border-transparent'}`}>Seguimientos y gestiones</button>
+      </div>
+      {vistaGeneral === 'agenda' ? <CrmBandeja onGestionar={abrirModalGestion} /> : cargando ? (
         <div className="text-center py-8">Cargando...</div>
+      ) : errorCarga ? (
+        <div role="alert" className="py-6 text-red-700">
+          {errorCarga}
+          <button onClick={cargarDatos} className="ml-3 underline">Reintentar</button>
+        </div>
       ) : (
         <>
           {/* Leyenda de colores */}
@@ -357,19 +401,17 @@ export default function CrmGestionCobros() {
           </div>
 
           {/* Gestiones Pendientes */}
-          <div className="bg-white rounded-lg shadow mb-6">
+          <section className="bg-white border-y mb-6">
             <div className="px-6 py-4 border-b">
               <h2 className="text-xl font-semibold">
                 Seguimientos Pendientes ({gestionesPendientes.length})
               </h2>
-              <p className="text-sm text-gray-600">
-                Clientes con promesas de pago o acciones programadas para hoy
-              </p>
+              <p className="text-sm text-gray-600">Vencidos y de hoy</p>
             </div>
 
             {gestionesPendientes.length === 0 ? (
               <div className="p-6 text-center text-gray-500">
-                No hay seguimientos pendientes para hoy
+                No hay seguimientos vencidos ni pendientes para hoy
               </div>
             ) : (
               <div className="divide-y">
@@ -377,8 +419,8 @@ export default function CrmGestionCobros() {
                   const colores = obtenerColorGestion(cliente.ultimaGestion);
                   return (
                     <div key={gestion.id} className={`p-4 ${colores.fondo} ${colores.borde} hover:bg-gray-100`}>
-                      <div className="flex justify-between items-start">
-                        <div className="flex-1">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-start">
+                        <div className="flex-1 min-w-0 break-words">
                           <div className="flex items-center gap-2">
                             <div className="font-medium">{cliente.cliente}</div>
                             <span className={`text-xs font-medium px-2 py-0.5 rounded ${colores.texto} bg-white`}>
@@ -399,8 +441,20 @@ export default function CrmGestionCobros() {
                               <span className="font-medium">Acción:</span> {gestion.proximaAccion}
                             </div>
                           )}
+                          <div className="mt-1 text-sm font-medium">
+                            Fecha prevista: {gestion.fechaProximaAccion
+                              ? new Date(gestion.fechaProximaAccion).toLocaleDateString('es-CO', { timeZone: 'UTC' }) : '-'}
+                          </div>
                         </div>
-                        <div className="flex gap-2">
+                        <div className="flex flex-wrap gap-2 shrink-0">
+                          <button
+                            onClick={() => cerrarSeguimiento(gestion.id)}
+                            disabled={cerrandoSeguimiento !== null}
+                            title="Marcar seguimiento como atendido"
+                            className="inline-flex items-center gap-1 px-3 py-1 text-sm border rounded text-green-800 disabled:opacity-50"
+                          >
+                            <Check size={16} /> Atendido
+                          </button>
                           <button
                             onClick={() => abrirModalGestion(cliente)}
                             className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
@@ -414,7 +468,23 @@ export default function CrmGestionCobros() {
                 })}
               </div>
             )}
-          </div>
+          </section>
+
+          <section className="mb-6 border-y bg-white">
+            <h2 className="px-6 py-4 text-xl font-semibold border-b">Gestiones de hoy ({gestionesRecientes.length})</h2>
+            {gestionesRecientes.length === 0 ? (
+              <p className="p-6 text-gray-500">No hay gestiones registradas hoy</p>
+            ) : (
+              <ul className="divide-y">
+                {gestionesRecientes.map(({ gestion, cliente }) => (
+                  <li key={gestion.id} className="px-6 py-3 break-words">
+                    <Link to={`/crm/cartera/${cliente.id}`} className="font-medium text-blue-700">{cliente.cliente}</Link>
+                    <p className="text-sm text-gray-600">Credito #{cliente.numero} · {gestion.resultado.replace(/_/g, ' ')}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
 
           {/* Clientes Prioritarios */}
           <div className="bg-white rounded-lg shadow">
@@ -566,6 +636,7 @@ export default function CrmGestionCobros() {
             {/* Contenido - Gestión */}
             {vistaModal === 'gestion' && (
               <form onSubmit={registrarGestion} className="p-6">
+                {esPromesa && <label className="block text-sm font-medium mb-4">Monto prometido (COP)<input type="number" min="1" step="1" required value={montoPromesa} onChange={e => setMontoPromesa(e.target.value)} className="block mt-1 w-full border rounded px-3 py-2" /></label>}
                 <div className="grid grid-cols-2 gap-4 mb-4">
                   <div>
                     <label className="block text-sm font-medium mb-1">Tipo de Gestión</label>
@@ -653,6 +724,7 @@ export default function CrmGestionCobros() {
                   <input
                     type="date"
                     value={formGestion.fechaProximaAccion}
+                    required={esPromesa}
                     onChange={(e) =>
                       setFormGestion({ ...formGestion, fechaProximaAccion: e.target.value })
                     }
@@ -672,7 +744,7 @@ export default function CrmGestionCobros() {
                     type="submit"
                     className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
                   >
-                    Registrar Gestión
+                    {guardandoGestion ? 'Guardando...' : esPromesa ? 'Registrar promesa' : 'Registrar Gestión'}
                   </button>
                 </div>
               </form>
