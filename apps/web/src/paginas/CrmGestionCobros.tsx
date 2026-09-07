@@ -82,6 +82,8 @@ export default function CrmGestionCobros() {
     cargarDatos();
     cargarEstadoWhatsapp();
     cargarPlantillas();
+    const intervaloWhatsapp = setInterval(cargarEstadoWhatsapp, 5000);
+    return () => clearInterval(intervaloWhatsapp);
   }, []);
 
   async function cargarEstadoWhatsapp() {
@@ -366,6 +368,7 @@ export default function CrmGestionCobros() {
         >
           Ver Cartera Completa
         </Link>
+        <Link to="/crm/agente" className="text-sm text-teal-700 underline">Agente y WhatsApp de cobranza</Link>
       </div>
 
       <div role="tablist" aria-label="Gestion de cobros" className="flex gap-2 mb-5 border-b border-gray-200">
@@ -756,7 +759,7 @@ export default function CrmGestionCobros() {
                 {!whatsappConectado ? (
                   <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
                     <p className="text-sm text-yellow-800">
-                      WhatsApp no está conectado. No puedes enviar mensajes en este momento.
+                      WhatsApp de cobranza no esta conectado. <Link to="/crm/agente" className="underline">Vincular numero de cobranza</Link>
                     </p>
                   </div>
                 ) : !clienteSeleccionado.telefono ? (

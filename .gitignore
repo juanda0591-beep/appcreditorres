@@ -24,12 +24,15 @@ npm-debug.log*
 whatsapp-session/
 **/whatsapp-session/
 auth_info_baileys/
+auth_info_baileys_cobranza/
 baileys_store/
 *.session.json
 
 # Configuración de IA (contiene API keys)
 config-ia.json
 **/config-ia.json
+config-agente-cobranza.json
+config-agente-cobranza.json.*
 
 # Uploads y archivos temporales
 uploads/

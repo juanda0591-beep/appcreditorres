@@ -32,6 +32,7 @@ import { rutasPedidos } from './rutas/pedidos.js';
 import { rutasConversaciones } from './rutas/conversaciones.js';
 import { rutasNotificaciones } from './rutas/notificaciones.js';
 import { rutasCrm } from './rutas/crm.js';
+import { rutasAdminCobranza } from './rutas/admin-cobranza.js';
 import { verificarSesion, soloAdmin } from './autenticacion.js';
 
 /**
@@ -193,6 +194,7 @@ export async function construirApp(): Promise<FastifyInstance> {
     await privado.register(rutasPedidos, { prefix: '/api' });
     await privado.register(rutasConversaciones, { prefix: '/api' });
     await privado.register(rutasCrm, { prefix: '/api/admin/crm' });
+    await privado.register(rutasAdminCobranza, { prefix: '/api/admin/cobranza' });
     await privado.register(rutasNotificaciones);
   });
 

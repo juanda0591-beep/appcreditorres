@@ -21,9 +21,15 @@ async function iniciar(): Promise<void> {
   // Conectar a WhatsApp con Baileys
   try {
     app.log.info('Conectando a WhatsApp...');
-    await conectarWhatsApp();
+    await conectarWhatsApp('ventas');
   } catch (error) {
     app.log.error({ err: error }, 'Error al conectar a WhatsApp');
+  }
+
+  const { existsSync } = await import('node:fs');
+  if (existsSync('./datos/auth_info_baileys_cobranza/creds.json')) {
+    try { await conectarWhatsApp('cobranza'); }
+    catch (error) { app.log.error({ err: error }, 'No se pudo conectar WhatsApp de cobranza'); }
   }
 
   // Al recibir la senal de apagado se cierran las conexiones antes de salir,
@@ -31,7 +37,7 @@ async function iniciar(): Promise<void> {
   for (const senal of ['SIGINT', 'SIGTERM'] as const) {
     process.once(senal, async () => {
       app.log.info(`Senal ${senal} recibida, cerrando`);
-      await desconectarWhatsApp();
+      await Promise.allSettled([desconectarWhatsApp('ventas', false), desconectarWhatsApp('cobranza', false)]);
       await app.close();
       cerrarBaseDatos();
       process.exit(0);

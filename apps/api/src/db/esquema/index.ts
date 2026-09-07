@@ -13,3 +13,4 @@ export * from './notificaciones.js';
 export * from './zonas-venta.js';
 export * from './crm.js';
 export * from './crm-etiquetas.js';
+export * from './cobranza-whatsapp.js';

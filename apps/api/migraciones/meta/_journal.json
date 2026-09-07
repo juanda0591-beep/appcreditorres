@@ -120,6 +120,13 @@
       "when": 1788566400001,
       "tag": "0016_crm_operativo",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1788652800000,
+      "tag": "0017_cobranza_whatsapp",
+      "breakpoints": true
     }
   ]
 }

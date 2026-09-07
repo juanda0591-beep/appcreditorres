@@ -23,6 +23,7 @@ import CrmGestionCobros from './paginas/CrmGestionCobros.js';
 import CrmDetalleCliente from './paginas/CrmDetalleCliente.js';
 import CrmGruposGestion from './paginas/CrmGruposGestion.js';
 import CrmGrupoDetalle from './paginas/CrmGrupoDetalle.js';
+import CrmAgente from './paginas/CrmAgente.js';
 
 export function App() {
   const sesion = useSesion();
@@ -139,6 +140,7 @@ function AppAutenticada({ usuario }: { usuario: UsuarioSesion }) {
               <Route path="/crm/cartera" element={<CrmCartera />} />
               <Route path="/crm/cartera/:id" element={<CrmDetalleCliente />} />
               <Route path="/crm/gestiones" element={<CrmGestionCobros />} />
+              <Route path="/crm/agente" element={<CrmAgente />} />
               <Route path="/crm/grupos" element={<CrmGruposGestion />} />
               <Route path="/crm/grupos/:grupoId" element={<CrmGrupoDetalle />} />
             </>

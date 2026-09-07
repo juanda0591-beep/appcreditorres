@@ -1002,7 +1002,7 @@ export const rutasCrm: FastifyPluginAsync = async (fastify) => {
     }
 
     const { obtenerEstadoConexion } = await import('../whatsapp/baileys-client.js');
-    const estado = obtenerEstadoConexion();
+    const estado = obtenerEstadoConexion('cobranza');
 
     return estado;
   });
@@ -1040,14 +1040,13 @@ export const rutasCrm: FastifyPluginAsync = async (fastify) => {
     }
 
     // Normalizar teléfono a formato colombiano (57 + 10 dígitos)
-    const telefonoLimpio = cliente.telefono.replace(/\D/g, '');
-    const telefonoNormalizado = telefonoLimpio.startsWith('57')
-      ? telefonoLimpio
-      : `57${telefonoLimpio}`;
+    const { telefonoCobranza, conversacionCobranza, enviarYGuardarCobranza } = await import('../whatsapp/cobranza-mensajes.js');
+    const telefonoNormalizado = telefonoCobranza(cliente.telefono);
+    if (!telefonoNormalizado) return reply.code(400).send({ error: 'Telefono colombiano invalido' });
 
     // Verificar conexión de WhatsApp
     const { obtenerEstadoConexion, enviarMensajeWhatsApp } = await import('../whatsapp/baileys-client.js');
-    const estado = obtenerEstadoConexion();
+    const estado = obtenerEstadoConexion('cobranza');
 
     if (!estado.conectado) {
       return reply.code(503).send({ error: 'WhatsApp no está conectado' });
@@ -1055,7 +1054,8 @@ export const rutasCrm: FastifyPluginAsync = async (fastify) => {
 
     try {
       // Enviar mensaje
-      await enviarMensajeWhatsApp(telefonoNormalizado, datos.mensaje);
+      const conversacion = await conversacionCobranza(`${telefonoNormalizado}@s.whatsapp.net`, telefonoNormalizado, cliente.cliente);
+      await enviarYGuardarCobranza(conversacion.id, datos.mensaje, 'gestor', texto => enviarMensajeWhatsApp(telefonoNormalizado, texto, 'cobranza'));
 
       // Registrar gestión automáticamente
       await db.insert(gestionesCobro).values({
