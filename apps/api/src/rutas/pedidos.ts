@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { obtenerTodosPedidos, actualizarEstadoPedido } from '../whatsapp/gestor-pedidos.js';
+import { ErrorAplicacion } from '../errores.js';
 
 export async function rutasPedidos(app: FastifyInstance) {
   // Obtener todos los pedidos
@@ -26,8 +27,8 @@ export async function rutasPedidos(app: FastifyInstance) {
 
       return { success: true, message: 'Estado actualizado' };
     } catch (error) {
-      reply.status(500);
-      return { success: false, error: 'Error al actualizar pedido' };
+      reply.status(error instanceof ErrorAplicacion ? error.codigoHttp : 500);
+      return { success: false, error: 'Error al actualizar pedido', mensaje: error instanceof ErrorAplicacion ? error.message : 'No se pudo actualizar el pedido' };
     }
   });
 }

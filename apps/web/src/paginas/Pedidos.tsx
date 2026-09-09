@@ -1,4 +1,8 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
+import { toast } from 'sonner';
+import { ModoVentas } from '../componentes/ModoVentas';
+import { NuevoPedidoVentas } from '../componentes/NuevoPedidoVentas';
 
 interface ProductoPedido {
   nombre: string;
@@ -12,6 +16,7 @@ interface Pedido {
   telefono: string;
   nombreCliente: string;
   direccion: string;
+  zona: string | null;
   productos: ProductoPedido[];
   total: number;
   estado: string;
@@ -24,6 +29,7 @@ export function PaginaPedidos() {
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
   const [filtroEstado, setFiltroEstado] = useState<string>('todos');
   const [cargando, setCargando] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     cargarPedidos();
@@ -42,8 +48,7 @@ export function PaginaPedidos() {
       console.log('📦 Respuesta API status:', res.status);
 
       if (!res.ok) {
-        console.error('❌ Error en la respuesta:', res.statusText);
-        return;
+        throw new Error('No se pudo consultar los pedidos');
       }
 
       const data = await res.json();
@@ -51,8 +56,10 @@ export function PaginaPedidos() {
       console.log('📦 Número de pedidos:', data.pedidos?.length || 0);
 
       setPedidos(data.pedidos || []);
+      setError('');
     } catch (error) {
       console.error('Error cargando pedidos:', error);
+      setError('No se pudieron cargar los pedidos');
     }
   };
 
@@ -68,9 +75,10 @@ export function PaginaPedidos() {
 
       if (res.ok) {
         cargarPedidos();
-      }
+      } else throw new Error('No se pudo actualizar el pedido');
     } catch (error) {
       console.error('Error actualizando estado:', error);
+      toast.error('No se pudo actualizar el pedido');
     }
     setCargando(false);
   };
@@ -107,6 +115,9 @@ export function PaginaPedidos() {
         Gestión de Pedidos WhatsApp
       </h1>
 
+      <ModoVentas />
+      <div className="mb-5"><NuevoPedidoVentas onGuardado={cargarPedidos} /></div>
+      {error && <p role="alert" className="text-red-700 mb-4">{error} <button className="underline" onClick={cargarPedidos}>Reintentar</button></p>}
       {/* Filtros */}
       <div style={{
         display: 'flex',
@@ -204,7 +215,7 @@ export function PaginaPedidos() {
       </div>
 
       {/* Lista de pedidos */}
-      {pedidosFiltrados.length === 0 ? (
+      {error ? null : pedidosFiltrados.length === 0 ? (
         <div style={{
           padding: '60px 20px',
           textAlign: 'center',
@@ -238,6 +249,8 @@ export function PaginaPedidos() {
                   <div style={{ fontSize: '14px', color: '#6b7280' }}>
                     📱 {pedido.telefono}
                   </div>
+                  <p className="text-sm text-gray-500 break-all mt-1">Pedido #{pedido.id}</p>
+                  {pedido.conversacionId && <Link to={`/conversaciones?id=${encodeURIComponent(pedido.conversacionId)}`} className="text-sm text-teal-700 underline">Abrir conversacion</Link>}
                 </div>
                 <div style={{
                   padding: '6px 16px',
@@ -257,6 +270,7 @@ export function PaginaPedidos() {
                 <div style={{ fontSize: '14px', color: '#6b7280', marginBottom: '12px' }}>
                   📍 <strong>Dirección:</strong> {pedido.direccion || 'No especificada'}
                 </div>
+                <p className="text-sm text-gray-600 mb-3">Municipio: {pedido.zona || 'Sin registrar'}</p>
 
                 {pedido.notas && (
                   <div style={{ fontSize: '14px', color: '#6b7280', marginBottom: '12px' }}>

@@ -26,25 +26,26 @@ export const rutasConversaciones: FastifyPluginAsync = async (app) => {
           telefono: conversacionesWhatsapp.telefono,
           nombreCliente: conversacionesWhatsapp.nombreCliente,
           estado: conversacionesWhatsapp.estado,
+          modoAtencion: conversacionesWhatsapp.modoAtencion,
           ultimoMensaje: conversacionesWhatsapp.ultimoMensaje,
           creadoEn: conversacionesWhatsapp.creadoEn,
           actualizadoEn: conversacionesWhatsapp.actualizadoEn,
           cantidadMensajes: sql<number>`(
             SELECT COUNT(*)
-            FROM ${mensajesWhatsapp}
-            WHERE ${mensajesWhatsapp.conversacionId} = ${conversacionesWhatsapp.id}
+            FROM mensajes_whatsapp AS m
+            WHERE m.conversacion_id = conversaciones_whatsapp.id
           )`,
           tienePedidos: sql<boolean>`(
             SELECT COUNT(*) > 0
-            FROM ${pedidosWhatsapp}
-            WHERE ${pedidosWhatsapp.conversacionId} = ${conversacionesWhatsapp.id}
+            FROM pedidos_whatsapp AS p
+            WHERE p.conversacion_id = conversaciones_whatsapp.id
           )`,
           pedidos: sql<Array<{ id: string; estado: string }>>`(
             SELECT json_group_array(
-              json_object('id', id, 'estado', estado)
+              json_object('id', p.id, 'estado', p.estado)
             )
-            FROM ${pedidosWhatsapp}
-            WHERE ${pedidosWhatsapp.conversacionId} = ${conversacionesWhatsapp.id}
+            FROM pedidos_whatsapp AS p
+            WHERE p.conversacion_id = conversaciones_whatsapp.id
           )`
         })
         .from(conversacionesWhatsapp)
@@ -119,6 +120,7 @@ export const rutasConversaciones: FastifyPluginAsync = async (app) => {
       // Parsear productos de cada pedido
       const pedidosProcesados = pedidos.map(p => ({
         ...p,
+        total: p.total / 100,
         productos: JSON.parse(p.productos)
       }));
 

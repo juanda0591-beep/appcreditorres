@@ -8,9 +8,20 @@ export const conversacionesWhatsapp = sqliteTable('conversaciones_whatsapp', {
   telefono: text('telefono').notNull(), // Número de WhatsApp del cliente
   nombreCliente: text('nombre_cliente'),
   estado: text('estado').notNull().default('activa'), // activa, cerrada, esperando
+  modoAtencion: text('modo_atencion').notNull().default('automatico'),
+  revisionAtencion: integer('revision_atencion').notNull().default(0),
+  jid: text('jid'),
+  transporte: text('transporte').notNull().default('baileys'),
+  borradorPedido: text('borrador_pedido'),
   ultimoMensaje: text('ultimo_mensaje'),
   creadoEn: text('creado_en').notNull(),
   actualizadoEn: text('actualizado_en').notNull(),
+});
+
+export const ajustesVentas = sqliteTable('ajustes_ventas', {
+  id: text('id').primaryKey().default('principal'),
+  modo: text('modo').notNull().default('automatico'),
+  revision: integer('revision').notNull().default(0),
 });
 
 /**

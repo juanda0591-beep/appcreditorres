@@ -1,14 +1,12 @@
 import { leerConfigIA } from '../rutas/admin-ia.js';
 import { db, esquema } from '../db/cliente.js';
-import { eq, like } from 'drizzle-orm';
+import { eq, like, desc, sql, and, ne } from 'drizzle-orm';
+import { estadoAtencionVentas, registrarMensajeVentas, enColaVentas } from './atencion-ventas.js';
+import { avanzarPedidoVentas } from './flujo-pedido-ventas.js';
 import { aProducto } from '../db/mapeo.js';
 import { enviarImagenWhatsApp } from './baileys-client.js';
 import { config } from '../config.js';
 import {
-  detectarIntencionCompra,
-  detectarInteres,
-  registrarPedidoSimple,
-  generarNumeroPedido,
   obtenerZonasVentaActivas,
   detectarZonaEnMensaje
 } from './gestor-pedidos.js';
@@ -25,7 +23,7 @@ const historialConversaciones = new Map<string, Array<{ role: 'user' | 'assistan
 /**
  * Obtener o crear conversación en la base de datos
  */
-async function obtenerOCrearConversacion(telefono: string, nombreCliente?: string): Promise<string> {
+async function obtenerOCrearConversacion(telefono: string, nombreCliente?: string, jid?: string, transporte = 'baileys'): Promise<string> {
   // Buscar conversación existente activa
   const conversacionesExistentes = await db
     .select()
@@ -43,7 +41,9 @@ async function obtenerOCrearConversacion(telefono: string, nombreCliente?: strin
       .update(conversacionesWhatsapp)
       .set({
         actualizadoEn: ahora,
-        ...(nombreCliente && { nombreCliente })
+        jid,
+        transporte,
+        ...(nombreCliente && !conversacion.nombreCliente && { nombreCliente })
       })
       .where(eq(conversacionesWhatsapp.id, conversacion.id));
 
@@ -55,6 +55,8 @@ async function obtenerOCrearConversacion(telefono: string, nombreCliente?: strin
   await db.insert(conversacionesWhatsapp).values({
     id: conversacionId,
     telefono,
+    jid,
+    transporte,
     nombreCliente: nombreCliente || null,
     estado: 'activa',
     ultimoMensaje: null,
@@ -98,41 +100,22 @@ async function guardarMensaje(
 /**
  * Cargar historial desde la base de datos (últimos N mensajes)
  */
-async function cargarHistorialDesdeDB(conversacionId: string, limite: number = 10): Promise<Array<{ role: 'user' | 'assistant', content: string, productos?: string[] }>> {
+async function cargarHistorialDesdeDB(conversacionId: string, limite: number = 10, excluirId?: string): Promise<Array<{ role: 'user' | 'assistant', content: string, productos?: string[] }>> {
   const mensajes = await db
     .select()
     .from(mensajesWhatsapp)
-    .where(eq(mensajesWhatsapp.conversacionId, conversacionId))
-    .orderBy(mensajesWhatsapp.creadoEn)
+    .where(and(eq(mensajesWhatsapp.conversacionId, conversacionId), excluirId ? ne(mensajesWhatsapp.id, excluirId) : undefined))
+    .orderBy(desc(mensajesWhatsapp.creadoEn))
     .limit(limite);
 
-  return mensajes.map(m => ({
+  return mensajes.reverse().map(m => ({
     role: m.rol as 'user' | 'assistant',
     content: m.contenido,
     productos: m.metadata ? JSON.parse(m.metadata).productos : undefined
   }));
 }
 
-interface ProductoPedidoPendiente {
-  nombre: string;
-  precio: number;
-  cantidad: number;
-}
 
-interface PedidoPendienteZona {
-  producto: ProductoPedidoPendiente;
-  telefonoCliente: string;
-  nombreContacto?: string;
-  resumenConversacion: string;
-  creadoEn: number;
-}
-
-// Pedidos ya confirmados a los que les falta que el cliente diga su zona.
-// Se descartan solos si pasan mas de 10 minutos sin respuesta, para que un
-// mensaje suelto mucho despues (sin relacion con el pedido) no se tome por
-// error como la respuesta de zona.
-const pedidosPendientesZona = new Map<string, PedidoPendienteZona>();
-const VENCIMIENTO_PENDIENTE_ZONA_MS = 10 * 60 * 1000;
 
 // Almacenar imágenes ya enviadas por cliente
 // Estructura: { numeroTelefono: Set<nombreProducto> }
@@ -384,70 +367,17 @@ async function obtenerProductosRelevantes(mensaje: string): Promise<string> {
   }
 }
 
-/**
- * Guarda el pedido y avisa al vendedor: si la zona tiene un vendedor
- * asignado le avisa a el, y si no (o si el cliente no dijo una zona
- * reconocida) usa el vendedor general de Ajustes como respaldo.
- */
-async function confirmarPedidoConZona(datos: {
-  producto: ProductoPedidoPendiente;
-  telefonoCliente: string;
-  nombreContacto?: string;
-  resumenConversacion: string;
-  zona: string | null;
-}): Promise<string> {
-  const { producto, telefonoCliente, nombreContacto, resumenConversacion, zona } = datos;
-
+async function avisarPedidoRegistrado(pedido: { id: string; telefono: string; nombreCliente: string; zona: string | null; productos: string }) {
+  const lista = JSON.parse(pedido.productos) as Array<{ nombre: string }>;
   try {
-    await registrarPedidoSimple({
-      telefono: telefonoCliente,
-      nombreContacto,
-      producto,
-      resumenConversacion,
-      zona
-    });
-  } catch (error) {
-    console.error('Error al guardar pedido simple:', error);
-  }
-
-  try {
-    const zonasActivas = zona ? await obtenerZonasVentaActivas() : [];
-    const zonaConVendedor = zonasActivas.find(z => z.nombre === zona);
-    const config = await obtenerConfiguracion();
-    const numeroDestino = zonaConVendedor?.whatsappVendedor || config.whatsappVendedor;
-
-    if (numeroDestino) {
-      const lineaZona = zona
-        ? `📍 Zona: *${zona}*${zonaConVendedor ? '' : ' (sin vendedor asignado, se avisa al general)'}\n`
-        : '';
-
-      const mensajeAviso = `🛒 *Nuevo cliente interesado*
-
-📱 Contactar a: *${telefonoCliente}*
-${nombreContacto ? `👤 Nombre en WhatsApp: ${nombreContacto}\n` : ''}${lineaZona}📦 Producto: *${producto.nombre}* - $${producto.precio.toLocaleString()}
-
-💬 Resumen de la conversación:
-${resumenConversacion}`;
-
-      await enviarMensajeWhatsApp(numeroDestino, mensajeAviso);
-      console.log('✅ Aviso enviado al vendedor:', numeroDestino);
-    } else {
-      console.warn('⚠️ No hay número de vendedor configurado - pedido guardado pero sin aviso');
-    }
-
-    await enviarNotificacionPedido({
-      titulo: '🛒 Nuevo cliente interesado',
-      mensaje: `${nombreContacto || telefonoCliente} está interesado en ${producto.nombre}`,
-      telefono: telefonoCliente,
-      producto: producto.nombre
-    });
-    console.log('✅ Notificación push enviada');
-  } catch (error) {
-    console.error('Error al enviar aviso al vendedor:', error);
-    // No fallar la respuesta al cliente si falla el aviso al vendedor
-  }
-
-  return '¡Perfecto! 🎉 Ya avisé a uno de nuestros asesores para que te contacte y te ayude a cerrar tu pedido. En un momento te escribe 😊';
+    const zonas = await obtenerZonasVentaActivas();
+    const zona = detectarZonaEnMensaje(pedido.zona ?? '', zonas);
+    const ajustes = await obtenerConfiguracion();
+    const destino = zona?.whatsappVendedor || ajustes.whatsappVendedor;
+    if (destino) await enviarMensajeWhatsApp(destino, `Nuevo pedido #${pedido.id}\nCliente: ${pedido.nombreCliente}\nTelefono: ${pedido.telefono}\nZona: ${pedido.zona ?? ''}\nProductos: ${lista.map(p => p.nombre).join(', ')}`, 'ventas');
+  } catch { console.error('Pedido registrado, pero no se pudo avisar al vendedor'); }
+  try { await enviarNotificacionPedido({ titulo: 'Nuevo pedido', mensaje: `Pedido de ${pedido.nombreCliente}`, telefono: pedido.telefono, producto: lista.map(p => p.nombre).join(', ') }); }
+  catch { console.error('Pedido registrado, pero no se pudo enviar la notificacion'); }
 }
 
 /**
@@ -457,147 +387,35 @@ export async function procesarMensajeWhatsApp(
   remitente: string,
   mensaje: string,
   nombreContacto?: string,
-  numeroTelefono?: string
+  numeroTelefono?: string,
+  opciones: { externoId?: string; transporte?: 'baileys' | 'cloud' } = {},
+): Promise<string> {
+  return enColaVentas(numeroTelefono || remitente, () => procesarMensajeVenta(remitente, mensaje, nombreContacto, numeroTelefono, opciones));
+}
+
+async function procesarMensajeVenta(
+  remitente: string, mensaje: string, nombreContacto: string | undefined, numeroTelefono: string | undefined,
+  opciones: { externoId?: string; transporte?: 'baileys' | 'cloud' },
 ): Promise<string> {
   try {
-    console.log(`Procesando mensaje de ${remitente}: ${mensaje}`);
-
-    // Delay de 3 segundos para simular escritura natural ANTES de todo
-    await new Promise(resolve => setTimeout(resolve, 3000));
-
     // Obtener o crear conversación en BD (usar numeroTelefono si está disponible, sino remitente)
     const telefonoParaDB = numeroTelefono || remitente.split('@')[0];
-    const conversacionId = await obtenerOCrearConversacion(telefonoParaDB, nombreContacto);
+    const conversacionId = await obtenerOCrearConversacion(telefonoParaDB, nombreContacto, remitente, opciones.transporte);
 
-    // PRIORIDAD 0: el cliente ya confirmo compra y le preguntamos la zona -
-    // este mensaje deberia ser su respuesta con el municipio/zona.
-    const pendienteZona = pedidosPendientesZona.get(remitente);
-    if (pendienteZona) {
-      pedidosPendientesZona.delete(remitente);
-
-      const vencido = Date.now() - pendienteZona.creadoEn > VENCIMIENTO_PENDIENTE_ZONA_MS;
-      if (!vencido) {
-        const zonas = await obtenerZonasVentaActivas();
-        const zonaDetectada = detectarZonaEnMensaje(mensaje, zonas);
-
-        // Guardar mensaje del usuario en BD
-        await guardarMensaje(conversacionId, 'user', mensaje);
-
-        const respuesta = await confirmarPedidoConZona({
-          ...pendienteZona,
-          zona: zonaDetectada?.nombre ?? null,
-        });
-
-        // Guardar respuesta en BD
-        await guardarMensaje(conversacionId, 'assistant', respuesta);
-
-        agregarLog(remitente, mensaje, respuesta, true);
-        return respuesta;
-      }
-      // Si vencio, se sigue con el flujo normal: el mensaje puede no tener
-      // nada que ver con la zona.
+    const recibido = await registrarMensajeVentas(conversacionId, 'user', mensaje, undefined, opciones.externoId);
+    if (!recibido) return '';
+    const control = await estadoAtencionVentas(conversacionId);
+    if (!control.automatico) return '';
+    if (/\b(quiero hablar con|necesito|pasame con|comunicarme con) (un |una |el |la )?(asesor|persona|humano|vendedor)\b/i.test(mensaje)) {
+      await db.update(conversacionesWhatsapp).set({ modoAtencion: 'manual', revisionAtencion: sql`${conversacionesWhatsapp.revisionAtencion} + 1` }).where(eq(conversacionesWhatsapp.id, conversacionId));
+      return '';
     }
-
-    // PRIORIDAD 1: Detectar CONFIRMACIÓN de compra
-    if (detectarIntencionCompra(mensaje)) {
-      // Obtener el último producto mencionado del historial (primero de memoria, luego de BD)
-      let historialCompra = historialConversaciones.get(remitente) || [];
-
-      // Si no hay historial en memoria, cargar desde BD
-      if (historialCompra.length === 0) {
-        historialCompra = await cargarHistorialDesdeDB(conversacionId, 10);
-        historialConversaciones.set(remitente, historialCompra);
-      }
-
-      let ultimoProducto = null;
-
-      for (let i = historialCompra.length - 1; i >= 0; i--) {
-        if (historialCompra[i].productos && historialCompra[i].productos!.length > 0) {
-          const nombreProducto = historialCompra[i].productos![historialCompra[i].productos!.length - 1];
-
-          // Buscar el producto para obtener el precio
-          const productosVisibles = await db
-            .select()
-            .from(productos)
-            .where(eq(productos.visible, true));
-
-          const p = productosVisibles.find(prod =>
-            aProducto(prod).nombre.toLowerCase() === nombreProducto.toLowerCase()
-          );
-
-          if (p) {
-            const prod = aProducto(p);
-            ultimoProducto = {
-              nombre: prod.nombre,
-              precio: prod.precios.credito, // Usar precio a crédito por defecto
-              cantidad: 1
-            };
-          }
-          break;
-        }
-      }
-
-      if (ultimoProducto) {
-        // remitente puede ser un JID interno "@lid" (Baileys v7); el numero
-        // real para mostrarle al vendedor es numeroTelefono si vino disponible.
-        const telefonoCliente = numeroTelefono || remitente.split('@')[0];
-
-        // Armar resumen corto de la conversación
-        const ultimosMensajes = historialCompra.slice(-6); // Últimos 3 intercambios
-        const resumenConversacion = ultimosMensajes
-          .map(m => `${m.role === 'user' ? 'Cliente' : 'María'}: ${m.content}`)
-          .join('\n');
-
-        const zonas = await obtenerZonasVentaActivas();
-
-        // Guardar mensaje del usuario en BD
-        await guardarMensaje(conversacionId, 'user', mensaje);
-
-        // Si hay zonas configuradas, primero se pregunta en cual esta el
-        // cliente para avisarle al vendedor correcto. Sin zonas configuradas,
-        // el comportamiento es el de siempre: aviso inmediato al general.
-        if (zonas.length > 0) {
-          pedidosPendientesZona.set(remitente, {
-            producto: ultimoProducto,
-            telefonoCliente,
-            nombreContacto,
-            resumenConversacion,
-            creadoEn: Date.now()
-          });
-
-          const respuesta = '¡Perfecto! 🎉 Para conectarte con el asesor de tu zona, cuéntame ¿en qué municipio o zona estás ubicado? 📍';
-
-          // Guardar respuesta en BD
-          await guardarMensaje(conversacionId, 'assistant', respuesta);
-
-          agregarLog(remitente, mensaje, respuesta, true);
-          return respuesta;
-        }
-
-        console.log('🎯 Detectada intención de compra - Guardando pedido y avisando al vendedor');
-        const respuesta = await confirmarPedidoConZona({
-          producto: ultimoProducto,
-          telefonoCliente,
-          nombreContacto,
-          resumenConversacion,
-          zona: null
-        });
-
-        // Guardar respuesta en BD
-        await guardarMensaje(conversacionId, 'assistant', respuesta);
-
-        agregarLog(remitente, mensaje, respuesta, true);
-        return respuesta;
-      } else {
-        const respuesta = 'Para hacer un pedido, primero déjame mostrarte nuestros productos. ¿Qué estás buscando? 😊';
-
-        // Guardar mensaje y respuesta en BD
-        await guardarMensaje(conversacionId, 'user', mensaje);
-        await guardarMensaje(conversacionId, 'assistant', respuesta);
-
-        agregarLog(remitente, mensaje, respuesta, true);
-        return respuesta;
-      }
+    const flujo = await avanzarPedidoVentas(conversacionId, mensaje, control.version);
+    if (flujo) {
+      if (flujo.pedido) await avisarPedidoRegistrado(flujo.pedido);
+      if (flujo.respuesta) await guardarMensaje(conversacionId, 'assistant', flujo.respuesta);
+      historialConversaciones.delete(remitente);
+      return flujo.respuesta;
     }
 
     // PRIORIDAD 2: Procesamiento normal con IA
@@ -609,13 +427,17 @@ export async function procesarMensajeWhatsApp(
     // Si no hay API key configurada, usar respuestas básicas
     if (!configIA.apiKey) {
       console.warn('API key de IA no configurada, usando respuestas básicas');
-      return respuestaBasica(mensaje);
+      const respuesta = respuestaBasica(mensaje);
+      const actual = await estadoAtencionVentas(conversacionId);
+      if (!actual.automatico || actual.version !== control.version) return '';
+      await guardarMensaje(conversacionId, 'assistant', respuesta);
+      return respuesta;
     }
 
     // Obtener o crear historial de conversación para este usuario
-    if (!historialConversaciones.has(remitente)) {
+    {
       // Cargar desde BD si no está en memoria
-      const historialDB = await cargarHistorialDesdeDB(conversacionId, 10);
+      const historialDB = await cargarHistorialDesdeDB(conversacionId, 10, recibido.id);
       historialConversaciones.set(remitente, historialDB);
     }
     const historial = historialConversaciones.get(remitente)!;
@@ -626,6 +448,8 @@ export async function procesarMensajeWhatsApp(
       const catalogo = await obtenerProductosRelevantes(mensaje);
 
       const respuesta = await consultarIA(mensaje, configIA, catalogo, historial);
+      const actual = await estadoAtencionVentas(conversacionId);
+      if (!actual.automatico || actual.version !== control.version) return '';
 
       // Detectar productos mencionados en esta conversación
       const productosMencionados = await detectarProductosMencionados(mensaje, respuesta);
@@ -652,11 +476,16 @@ export async function procesarMensajeWhatsApp(
       }
 
       // Guardar mensaje del usuario y respuesta EN BASE DE DATOS
-      await guardarMensaje(conversacionId, 'user', mensaje);
       await guardarMensaje(conversacionId, 'assistant', respuesta, { productos: productosMencionados });
 
       // Enviar imágenes de productos mencionados
-      await enviarImagenesProductos(remitente, productosMencionados);
+      if (opciones.transporte !== 'cloud') {
+        try { await enviarImagenesProductos(remitente, productosMencionados, async () => {
+          const vigente = await estadoAtencionVentas(conversacionId);
+          return vigente.automatico && vigente.version === control.version;
+        }); }
+        catch { console.error('No se pudieron enviar las imagenes del catalogo'); }
+      }
 
       // Guardar log de actividad exitoso
       agregarLog(remitente, mensaje, respuesta, true);
@@ -667,7 +496,8 @@ export async function procesarMensajeWhatsApp(
       const respuestaError = 'Lo siento, hubo un error al procesar tu mensaje. Un asesor te contactará pronto.';
 
       // Guardar en BD aunque haya error
-      await guardarMensaje(conversacionId, 'user', mensaje);
+      const actual = await estadoAtencionVentas(conversacionId);
+      if (!actual.automatico || actual.version !== control.version) return '';
       await guardarMensaje(conversacionId, 'assistant', respuestaError);
 
       // Guardar log de actividad con error
@@ -713,7 +543,7 @@ async function detectarProductosMencionados(mensajeCliente: string, respuestaIA:
 /**
  * Detecta productos mencionados y envía sus imágenes
  */
-async function enviarImagenesProductos(remitente: string, productosMencionados: string[]): Promise<void> {
+async function enviarImagenesProductos(remitente: string, productosMencionados: string[], permitir: () => Promise<boolean>): Promise<void> {
   try {
     if (productosMencionados.length === 0) {
       return;
@@ -760,7 +590,8 @@ async function enviarImagenesProductos(remitente: string, productosMencionados: 
         const caption = `*${prod.nombre}* 🏠\n💰 Contado: *$${prod.precios.contado.toLocaleString()}*\n💳 Crédito: *$${prod.precios.credito.toLocaleString()}*\n📦 Inicial: *$${prod.precios.inicial.toLocaleString()}*\n⏰ Semanal: *$${prod.precios.pagoSemanal.toLocaleString()}*`;
 
         // Enviar imagen
-        await enviarImagenWhatsApp(remitente, urlImagen, caption);
+        if (!await permitir()) return;
+        if (await enviarImagenWhatsApp(remitente, urlImagen, caption, permitir) === false) return;
         console.log(`📸 Imagen enviada de: ${prod.nombre}`);
 
         // Marcar como enviada
@@ -878,7 +709,8 @@ Suena como persona real, no bot. Sé conversacional pero eficiente.`;
 ${catalogo}
 ---
 
-Usa SOLO la info del catálogo para responder sobre productos/precios. USA formato WhatsApp con *negritas* y emojis.`;
+Usa SOLO la info del catálogo para responder sobre productos/precios. USA formato WhatsApp con *negritas* y emojis.
+No afirmes que registraste un pedido o avisaste a un vendedor. Los pedidos se registran unicamente en el flujo de confirmacion del sistema. Cuando quiera comprar, invita al cliente a escribir "quiero comprar" seguido del nombre del producto. No inventes aprobacion de credito, descuentos o entrega garantizada.`;
 
   // Si hay un último producto mencionado, agregarlo al contexto
   if (ultimoProductoMencionado) {

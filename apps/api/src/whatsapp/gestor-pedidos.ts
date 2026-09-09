@@ -1,5 +1,8 @@
 import { db, esquema } from '../db/cliente.js';
 import { eq, desc } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
+import { ErrorDatosInvalidos, ErrorNoEncontrado } from '../errores.js';
+import type { TxVentas } from './atencion-ventas.js';
 
 const { pedidosWhatsapp, zonasVenta } = esquema;
 
@@ -49,43 +52,9 @@ export function detectarInteres(mensaje: string): boolean {
  * Detectar confirmación de compra (intención clara de adquirir)
  */
 export function detectarIntencionCompra(mensaje: string): boolean {
-  const palabrasClave = [
-    'hacer pedido',
-    'quiero este',
-    'quiero ese',
-    'lo quiero',
-    'me lo llevo',
-    'lo compro',
-    'comprarlo',
-    'separar',
-    'apartarlo',
-    'solicitar',
-    'sí lo quiero',
-    'si lo quiero',
-    'sí ese',
-    'si ese',
-    'ese mismo',
-    'este mismo',
-    'lo llevo',
-    'me lo llevaré',
-    'quiero comprarlo',
-    'cómo hago para comprarlo',
-    'como lo compro',
-    'puedo comprarlo',
-    'me lo das',
-    'dámelo',
-    'confirmo',
-    'sepáralo',
-    'separalo',
-    'apártalo',
-    'apartalo',
-    'pedirlo',
-    'llevar',
-    'llevarlo'
-  ];
-
-  const mensajeLower = mensaje.toLowerCase().trim();
-  return palabrasClave.some(palabra => mensajeLower.includes(palabra));
+  const texto = normalizarTexto(mensaje).trim();
+  if (/\b(no|cancelar|cancela|todavia|aun|despues|luego)\b/.test(texto)) return false;
+  return /\b(quiero (comprar|pedir|este|ese|el|la|un|una)|lo quiero|me lo llevo|lo compro|hacer (un )?pedido|hacer (una )?compra|realizar (un )?pedido|confirmo|separalo|apartalo|comprarlo|pedirlo)\b/.test(texto);
 }
 
 /** Quita tildes y pasa a minusculas, para comparar nombres de zona sin depender de como los escriba el cliente. */
@@ -131,9 +100,7 @@ export function detectarZonaEnMensaje(
 /**
  * Generar ID único para pedido
  */
-function generarIdPedido(): string {
-  return `pedido_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-}
+function generarIdPedido(): string { return randomUUID(); }
 
 /**
  * Generar número de pedido legible
@@ -149,40 +116,40 @@ export function generarNumeroPedido(): string {
 }
 
 /**
- * Guarda un registro simple de pedido: no recopila cedula/direccion/municipio
- * paso a paso, solo deja constancia de que un cliente mostro intencion de
- * compra, para que quede historial en el panel admin mientras el vendedor
- * humano hace el seguimiento real por WhatsApp.
+ * Guarda la solicitud con su conversacion real. El flujo automatico o el
+ * gestor recopilan y confirman los datos antes de llamar esta funcion.
  */
 export async function registrarPedidoSimple(datos: {
+  conversacionId: string;
   telefono: string;
   nombreContacto?: string;
   producto: ProductoPedido;
   resumenConversacion: string;
   zona?: string | null;
-}): Promise<void> {
+  direccion?: string;
+  id?: string;
+}, consulta: typeof db | TxVentas = db) {
   const { telefono, nombreContacto, producto, resumenConversacion, zona } = datos;
 
   const pedidoData = {
-    id: generarIdPedido(),
-    conversacionId: `conv_${telefono}_${Date.now()}`,
+    id: datos.id ?? generarIdPedido(),
+    conversacionId: datos.conversacionId,
     telefono,
     nombreCliente: nombreContacto || 'Sin nombre',
-    direccion: null,
+    direccion: datos.direccion ?? null,
     zona: zona ?? null,
     productos: JSON.stringify([producto]),
-    total: producto.precio * producto.cantidad * 100, // En centavos
+    total: Math.round(producto.precio * producto.cantidad * 100), // En centavos
     estado: 'pendiente',
     notas: resumenConversacion,
     creadoEn: new Date().toISOString(),
     actualizadoEn: new Date().toISOString()
   };
 
-  console.log('💾 Guardando pedido simple en base de datos:', pedidoData);
-
   try {
-    await db.insert(pedidosWhatsapp).values(pedidoData);
+    const [pedido] = await consulta.insert(pedidosWhatsapp).values(pedidoData).returning();
     console.log('✅ Pedido guardado exitosamente:', pedidoData.id);
+    return pedido;
   } catch (error) {
     console.error('❌ Error guardando pedido en base de datos:', error);
     throw error;
@@ -211,7 +178,7 @@ export async function obtenerTodosPedidos() {
     return pedidosMapeados;
   } catch (error) {
     console.error('❌ Error obteniendo pedidos:', error);
-    return [];
+    throw error;
   }
 }
 
@@ -219,11 +186,14 @@ export async function obtenerTodosPedidos() {
  * Actualizar estado de un pedido
  */
 export async function actualizarEstadoPedido(pedidoId: string, nuevoEstado: string) {
-  await db
+  if (!['pendiente', 'confirmado', 'enviado', 'entregado', 'cancelado'].includes(nuevoEstado)) throw new ErrorDatosInvalidos('Estado de pedido invalido');
+  const [pedido] = await db
     .update(pedidosWhatsapp)
     .set({
       estado: nuevoEstado,
       actualizadoEn: new Date().toISOString()
     })
-    .where(eq(pedidosWhatsapp.id, pedidoId));
+    .where(eq(pedidosWhatsapp.id, pedidoId)).returning();
+  if (!pedido) throw new ErrorNoEncontrado('Pedido no encontrado');
+  return pedido;
 }

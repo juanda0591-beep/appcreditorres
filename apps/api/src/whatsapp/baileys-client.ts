@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { rm } from 'node:fs/promises';
 import { procesarMensajeWhatsApp } from './procesar-mensaje.js';
 import { procesarMensajeCobranza } from './cobranza-mensajes.js';
+import { respuestaVentasPermitida } from './atencion-ventas.js';
 
 export type CanalWhatsApp = 'ventas' | 'cobranza';
 type Socket = ReturnType<typeof makeWASocket>;
@@ -123,8 +124,8 @@ export function conectarWhatsApp(canal: CanalWhatsApp = 'ventas', reintento = fa
           };
           if (canal === 'cobranza') await procesarMensajeCobranza({ jid, telefono: numero, nombre: mensaje.pushName ?? undefined, externoId: mensaje.key.id!, texto }, enviar, vigente);
           else {
-            const respuesta = await procesarMensajeWhatsApp(jid, texto, mensaje.pushName ?? undefined, numero);
-            if (respuesta && vigente()) await enviar(respuesta);
+            const respuesta = await procesarMensajeWhatsApp(jid, texto, mensaje.pushName ?? undefined, numero, { externoId: mensaje.key.id! });
+            if (respuesta && vigente() && await respuestaVentasPermitida(numero || jid.split('@')[0]!)) await enviar(respuesta);
           }
         }).catch(() => { console.error(`Error procesando mensaje de ${canal}`); });
         sesion.colas.set(colaId, tareaMensaje);
@@ -147,14 +148,15 @@ export async function enviarMensajeWhatsApp(telefono: string, mensaje: string, c
   return sesion.socket.sendMessage(telefono.includes('@') ? telefono : `${telefono}@s.whatsapp.net`, { text: mensaje });
 }
 
-export async function enviarImagenWhatsApp(telefono: string, urlImagen: string, caption?: string) {
+export async function enviarImagenWhatsApp(telefono: string, urlImagen: string, caption?: string, permitir: () => Promise<boolean> = async () => true) {
   const socket = sesiones.ventas.socket;
   if (!socket || !sesiones.ventas.conectado) throw new Error('WhatsApp de ventas no esta conectado');
   const response = await fetch(urlImagen);
   if (!response.ok) throw new Error(`Error descargando imagen: ${response.status}`);
-  await socket.sendMessage(telefono.includes('@') ? telefono : `${telefono}@s.whatsapp.net`, {
-    image: Buffer.from(await response.arrayBuffer()), caption: caption ?? '',
-  });
+  const image = Buffer.from(await response.arrayBuffer());
+  if (socket !== sesiones.ventas.socket || !await permitir()) return false;
+  await socket.sendMessage(telefono.includes('@') ? telefono : `${telefono}@s.whatsapp.net`, { image, caption: caption ?? '' });
+  return true;
 }
 
 export async function desconectarWhatsApp(canal: CanalWhatsApp = 'ventas', cerrarSesion = true) {

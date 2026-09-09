@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { ModoVentas } from '../componentes/ModoVentas';
 
 interface EstadoWhatsApp {
   conectado: boolean;
@@ -288,6 +289,7 @@ export function PaginaAdmin() {
         </div>
       )}
 
+      <ModoVentas />
       {/* Indicadores de Estado */}
       <div style={{
         display: 'grid',

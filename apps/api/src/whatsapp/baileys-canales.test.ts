@@ -15,6 +15,7 @@ vi.mock('@whiskeysockets/baileys', () => ({
 vi.mock('node:fs/promises', () => ({ rm: mocks.rm }));
 vi.mock('qrcode', () => ({ default: { toDataURL: async (qr: string) => `data:${qr}` } }));
 vi.mock('./procesar-mensaje.js', () => ({ procesarMensajeWhatsApp: mocks.ventas }));
+vi.mock('./atencion-ventas.js', () => ({ respuestaVentasPermitida: vi.fn().mockResolvedValue(true) }));
 vi.mock('./cobranza-mensajes.js', () => ({ procesarMensajeCobranza: mocks.cobranza }));
 const tick = () => new Promise(resolve => setTimeout(resolve, 20));
 let transporte: typeof import('./baileys-client.js');

@@ -2,13 +2,11 @@ import type { FastifyInstance } from 'fastify';
 import { nanoid } from 'nanoid';
 import { db, esquema } from '../db/cliente.js';
 import { eq, desc } from 'drizzle-orm';
-import { generarRespuestaIA, buscarProductosRelevantes } from '../servicios/agente-ia.js';
 
 const {
   conversacionesWhatsapp,
   mensajesWhatsapp,
   pedidosWhatsapp,
-  productos,
 } = esquema;
 
 /**
@@ -61,113 +59,10 @@ export async function rutasWhatsapp(app: FastifyInstance) {
 
       console.log(`Mensaje recibido de ${telefono}: ${textoMensaje}`);
 
-      // 1. Buscar o crear conversación
-      let [conversacion] = await db
-        .select()
-        .from(conversacionesWhatsapp)
-        .where(eq(conversacionesWhatsapp.telefono, telefono))
-        .limit(1);
-
-      if (!conversacion) {
-        const ahora = new Date().toISOString();
-        [conversacion] = await db
-          .insert(conversacionesWhatsapp)
-          .values({
-            id: nanoid(),
-            telefono,
-            estado: 'activa',
-            ultimoMensaje: textoMensaje,
-            creadoEn: ahora,
-            actualizadoEn: ahora,
-          })
-          .returning();
-      }
-
-      // 2. Guardar mensaje del usuario
-      await db.insert(mensajesWhatsapp).values({
-        id: nanoid(),
-        conversacionId: conversacion!.id,
-        rol: 'user',
-        contenido: textoMensaje,
-        creadoEn: new Date().toISOString(),
-      });
-
-      // 3. Obtener historial de conversación (últimos 10 mensajes)
-      const historialDB = await db
-        .select()
-        .from(mensajesWhatsapp)
-        .where(eq(mensajesWhatsapp.conversacionId, conversacion!.id))
-        .orderBy(desc(mensajesWhatsapp.creadoEn))
-        .limit(10);
-
-      const historial = historialDB.reverse().map((msg) => ({
-        role: msg.rol as 'user' | 'assistant' | 'system',
-        content: msg.contenido,
-      }));
-
-      // 4. Obtener productos disponibles
-      const todosProductos = await db.select().from(productos);
-
-      const productosContexto = todosProductos.map((p) => ({
-        id: p.id,
-        nombre: p.nombre,
-        descripcion: p.descripcion || '',
-        precio: p.precioContado,
-        precioPromocion: p.enPromocion ? p.precioContado * 0.9 : undefined,
-        enPromocion: p.enPromocion,
-        imagenUrl: p.imagenes ? `/uploads/${JSON.parse(p.imagenes)[0]}` : undefined,
-      }));
-
-      // 5. Buscar productos relevantes
-      const productosRelevantes = buscarProductosRelevantes(
-        textoMensaje,
-        productosContexto,
-      );
-
-      // 6. Generar respuesta con OpenAI
-      const respuestaIA = await generarRespuestaIA(
-        textoMensaje,
-        productosRelevantes,
-        historial,
-      );
-
-      // 7. Guardar respuesta del asistente
-      await db.insert(mensajesWhatsapp).values({
-        id: nanoid(),
-        conversacionId: conversacion!.id,
-        rol: 'assistant',
-        contenido: respuestaIA,
-        metadata: JSON.stringify({
-          productosRelevantes: productosRelevantes.map((p) => p.id),
-        }),
-        creadoEn: new Date().toISOString(),
-      });
-
-      // 8. Actualizar conversación
-      await db
-        .update(conversacionesWhatsapp)
-        .set({
-          ultimoMensaje: respuestaIA,
-          actualizadoEn: new Date().toISOString(),
-        })
-        .where(eq(conversacionesWhatsapp.id, conversacion!.id));
-
-      // 9. Enviar respuesta a WhatsApp
-      await enviarMensajeWhatsApp(telefono, respuestaIA);
-
-      // 10. Si hay productos relevantes con imagen, enviarlas
-      if (productosRelevantes.length > 0) {
-        for (const producto of productosRelevantes.slice(0, 3)) {
-          // Máximo 3 productos
-          if (producto.imagenUrl) {
-            await enviarImagenWhatsApp(
-              telefono,
-              producto.imagenUrl,
-              `${producto.nombre} - $${producto.enPromocion ? producto.precioPromocion : producto.precio}`,
-            );
-          }
-        }
-      }
+      const { procesarMensajeWhatsApp } = await import('../whatsapp/procesar-mensaje.js');
+      const { respuestaVentasPermitida } = await import('../whatsapp/atencion-ventas.js');
+      const respuesta = await procesarMensajeWhatsApp(telefono, textoMensaje, undefined, telefono, { externoId: mensaje.id, transporte: 'cloud' });
+      if (respuesta && await respuestaVentasPermitida(telefono)) await enviarMensajeWhatsApp(telefono, respuesta);
 
       return reply.send({ success: true });
     } catch (error) {

@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useState, useRef } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { ModoVentas } from '../componentes/ModoVentas';
+import { AtencionConversacionVentas } from '../componentes/AtencionConversacionVentas';
 
 interface Pedido {
   id: string;
@@ -12,6 +14,7 @@ interface Conversacion {
   nombreCliente: string | null;
   estado: string;
   ultimoMensaje: string | null;
+  modoAtencion: string;
   creadoEn: string;
   actualizadoEn: string;
   cantidadMensajes: number;
@@ -24,7 +27,7 @@ interface Mensaje {
   conversacionId: string;
   rol: 'user' | 'assistant';
   contenido: string;
-  metadata: { productos?: string[] } | null;
+  metadata: { productos?: string[]; origen?: string; nombreUsuario?: string } | null;
   creadoEn: string;
 }
 
@@ -48,6 +51,8 @@ interface DetalleConversacion {
 }
 
 export function Conversaciones() {
+  const [parametros] = useSearchParams();
+  const detalleActual = useRef<string | null>(null);
   const [conversaciones, setConversaciones] = useState<Conversacion[]>([]);
   const [conversacionSeleccionada, setConversacionSeleccionada] = useState<string | null>(null);
   const [detalle, setDetalle] = useState<DetalleConversacion | null>(null);
@@ -57,11 +62,19 @@ export function Conversaciones() {
 
   useEffect(() => {
     cargarConversaciones();
+    const intervalo = setInterval(() => cargarConversaciones(false), 5000);
+    return () => clearInterval(intervalo);
   }, []);
+  useEffect(() => { const id = parametros.get('id'); if (id) cargarDetalle(id); }, [parametros]);
+  useEffect(() => {
+    if (!conversacionSeleccionada) return;
+    const intervalo = setInterval(() => cargarDetalle(conversacionSeleccionada, false), 5000);
+    return () => clearInterval(intervalo);
+  }, [conversacionSeleccionada]);
 
-  async function cargarConversaciones() {
+  async function cargarConversaciones(mostrarCarga = true) {
     try {
-      setCargando(true);
+      if (mostrarCarga) setCargando(true);
       setError(null);
       const res = await fetch('/api/admin/conversaciones', {
         credentials: 'include'
@@ -81,9 +94,11 @@ export function Conversaciones() {
     }
   }
 
-  async function cargarDetalle(conversacionId: string) {
+  async function cargarDetalle(conversacionId: string, mostrarCarga = true) {
+    if (mostrarCarga) detalleActual.current = conversacionId;
+    if (detalleActual.current !== conversacionId) return;
     try {
-      setCargandoDetalle(true);
+      if (mostrarCarga) setCargandoDetalle(true);
       setError(null);
       const res = await fetch(`/api/admin/conversaciones/${conversacionId}`, {
         credentials: 'include'
@@ -94,13 +109,14 @@ export function Conversaciones() {
       }
 
       const data = await res.json();
+      if (detalleActual.current !== conversacionId) return;
       setDetalle(data);
       setConversacionSeleccionada(conversacionId);
     } catch (err) {
       setError('Error al cargar detalle de conversación');
       console.error(err);
     } finally {
-      setCargandoDetalle(false);
+      if (detalleActual.current === conversacionId) setCargandoDetalle(false);
     }
   }
 
@@ -142,6 +158,7 @@ export function Conversaciones() {
           </Link>
         </div>
 
+        <ModoVentas />
         {error && (
           <div className="mb-4 p-4 bg-red-950/30 border border-red-900/50 rounded-lg text-red-400 text-sm">
             {error}
@@ -253,6 +270,8 @@ export function Conversaciones() {
                   </div>
                 </div>
 
+                <AtencionConversacionVentas key={detalle.conversacion.id} conversacion={detalle.conversacion} onActualizado={() => { cargarDetalle(detalle.conversacion.id, false); cargarConversaciones(false); }} />
+
                 {/* Pedidos asociados */}
                 {detalle.pedidos.length > 0 && (
                   <div className="p-4 border-b border-slate-800 bg-slate-900/80">
@@ -310,7 +329,7 @@ export function Conversaciones() {
                       } rounded-lg p-3`}>
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-xs font-medium text-slate-400">
-                            {mensaje.rol === 'user' ? 'Cliente' : 'María IA'}
+                            {mensaje.rol === 'user' ? 'Cliente' : mensaje.metadata?.origen === 'gestor' ? mensaje.metadata.nombreUsuario || 'Gestor' : 'María IA'}
                           </span>
                           <span className="text-xs text-slate-600">
                             {formatearFecha(mensaje.creadoEn).split(',')[1]}

@@ -33,6 +33,7 @@ import { rutasConversaciones } from './rutas/conversaciones.js';
 import { rutasNotificaciones } from './rutas/notificaciones.js';
 import { rutasCrm } from './rutas/crm.js';
 import { rutasAdminCobranza } from './rutas/admin-cobranza.js';
+import { rutasAdminVentas } from './rutas/admin-ventas.js';
 import { verificarSesion, soloAdmin } from './autenticacion.js';
 
 /**
@@ -191,6 +192,7 @@ export async function construirApp(): Promise<FastifyInstance> {
     await privado.register(rutasUsuarios, { prefix: '/api/usuarios' });
     await privado.register(rutasAdminWhatsApp, { prefix: '/api' });
     await privado.register(rutasAdminIA, { prefix: '/api' });
+    await privado.register(rutasAdminVentas, { prefix: '/api/admin/ventas' });
     await privado.register(rutasPedidos, { prefix: '/api' });
     await privado.register(rutasConversaciones, { prefix: '/api' });
     await privado.register(rutasCrm, { prefix: '/api/admin/crm' });
