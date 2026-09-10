@@ -191,14 +191,12 @@ function TarjetaProducto({ producto }: { producto: Producto }) {
 
       <div className="mt-3 flex flex-wrap gap-1.5">
         {/*
-          capture="environment" hace que el celular abra la camara de atras
-          directamente, que es lo que uno quiere al fotografiar un producto.
+          Sin capture="environment" el móvil permite elegir entre cámara y galería
         */}
         <input
           ref={entrada}
           type="file"
           accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
-          capture="environment"
           className="hidden"
           onChange={elegirFoto}
         />
