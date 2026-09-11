@@ -115,6 +115,20 @@ export function conectarWhatsApp(canal: CanalWhatsApp = 'ventas', reintento = fa
         const tareaMensaje = (sesion.colas.get(colaId) ?? Promise.resolve()).catch(() => {}).then(async () => {
           if (!vigente()) return;
           const contenido = mensaje.message?.ephemeralMessage?.message ?? mensaje.message;
+
+          // Detectar audio en ventas
+          if (canal === 'ventas' && contenido?.audioMessage) {
+            console.log(`🎤 Audio recibido de ${numero || jid}`);
+            try {
+              const { procesarAudioBaileys } = await import('./procesar-audio-baileys.js');
+              await procesarAudioBaileys(socket, jid, mensaje, numero);
+            } catch (error) {
+              console.error('Error procesando audio:', error);
+              await socket.sendMessage(jid, { text: '❌ Hubo un error procesando tu audio. Por favor escribe tu mensaje.' });
+            }
+            return;
+          }
+
           const texto = contenido?.conversation || contenido?.extendedTextMessage?.text ||
             (canal === 'cobranza' ? contenido?.imageMessage?.caption || contenido?.documentMessage?.caption || (contenido?.audioMessage ? '[Audio recibido: requiere revision del asesor]' : contenido?.imageMessage || contenido?.documentMessage ? '[Adjunto recibido: requiere revision del asesor]' : '') : '');
           if (!texto) return;
