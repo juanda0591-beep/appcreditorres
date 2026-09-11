@@ -113,8 +113,8 @@ async function obtenerUrlAudio(audioId: string, token: string): Promise<string |
       return null;
     }
 
-    const data = await response.json();
-    return data.url;
+    const data = await response.json() as { url?: string };
+    return data.url || null;
   } catch (error) {
     console.error('Error en obtenerUrlAudio:', error);
     return null;
@@ -263,8 +263,12 @@ async function enviarAudioWhatsApp(telefono: string, rutaArchivo: string): Promi
       throw new Error(`Error subiendo audio: ${error}`);
     }
 
-    const uploadData = await uploadResponse.json();
+    const uploadData = await uploadResponse.json() as { id?: string };
     const mediaId = uploadData.id;
+
+    if (!mediaId) {
+      throw new Error('No se obtuvo ID del medio subido');
+    }
 
     // Luego enviar el mensaje con el audio
     const sendResponse = await fetch(
