@@ -51,6 +51,20 @@ export async function rutasWhatsapp(app: FastifyInstance) {
 
       const mensaje = body.entry[0].changes[0].value.messages[0];
       const telefono = mensaje.from; // Número del cliente
+
+      // Manejar mensajes de audio
+      if (mensaje.type === 'audio' && mensaje.audio?.id) {
+        console.log(`Audio recibido de ${telefono}, ID: ${mensaje.audio.id}`);
+
+        const { procesarAudioWhatsApp } = await import('../whatsapp/procesar-audio.js');
+        const { respuestaVentasPermitida } = await import('../whatsapp/atencion-ventas.js');
+
+        await procesarAudioWhatsApp(telefono, mensaje.audio.id, mensaje.id);
+
+        return reply.send({ success: true });
+      }
+
+      // Manejar mensajes de texto
       const textoMensaje = mensaje.text?.body || '';
 
       if (!textoMensaje) {
