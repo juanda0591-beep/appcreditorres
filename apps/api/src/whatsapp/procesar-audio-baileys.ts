@@ -92,11 +92,11 @@ export async function procesarAudioBaileys(
     const fs = await import('node:fs/promises');
     const audioBuffer = await fs.readFile(archivoAudioRespuesta);
 
-    // 6. Enviar audio al cliente
+    // 6. Enviar audio al cliente con formato OGG para mayor compatibilidad
     console.log('📤 Enviando audio...');
     await socket.sendMessage(jid, {
       audio: audioBuffer,
-      mimetype: 'audio/mpeg',
+      mimetype: 'audio/ogg; codecs=opus',
       ptt: true, // Push to talk (nota de voz)
     });
 
