@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { procesarMensajeWhatsApp } from './procesar-mensaje.js';
 import { respuestaVentasPermitida } from './atencion-ventas.js';
+import { convertirPreciosEnTexto } from './formato-precios-voz.js';
 
 /**
  * Procesar audio de Baileys (WhatsApp Web):
@@ -85,7 +86,10 @@ export async function procesarAudioBaileys(
 
     // 4. Convertir respuesta a audio con TTS
     console.log('🔊 Generando audio TTS...');
-    archivoAudioRespuesta = await generarAudioTTS(openai, respuestaTexto);
+    // Convertir precios a formato legible para la voz
+    const textoParaVoz = convertirPreciosEnTexto(respuestaTexto);
+    console.log(`🗣️  Texto para voz: ${textoParaVoz}`);
+    archivoAudioRespuesta = await generarAudioTTS(openai, textoParaVoz);
     console.log(`✅ Audio TTS generado: ${archivoAudioRespuesta}`);
 
     // 5. Leer el archivo de audio
