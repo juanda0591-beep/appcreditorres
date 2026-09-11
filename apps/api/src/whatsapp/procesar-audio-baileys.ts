@@ -148,19 +148,21 @@ async function transcribirAudio(openai: OpenAI, rutaArchivo: string): Promise<st
 }
 
 /**
- * Generar audio con Text-to-Speech de OpenAI
+ * Generar audio con Text-to-Speech de OpenAI y convertir a OGG
  */
 async function generarAudioTTS(openai: OpenAI, texto: string): Promise<string> {
   try {
-    const mp3Response = await openai.audio.speech.create({
-      model: 'tts-1', // Modelo más rápido y económico
-      voice: 'nova', // Voz femenina en español (opciones: alloy, echo, fable, onyx, nova, shimmer)
+    // Generar audio en formato OPUS (mejor compatibilidad con WhatsApp)
+    const opusResponse = await openai.audio.speech.create({
+      model: 'tts-1',
+      voice: 'nova',
       input: texto,
+      response_format: 'opus', // Formato nativo de WhatsApp
       speed: 1.0,
     });
 
-    const buffer = Buffer.from(await mp3Response.arrayBuffer());
-    const rutaArchivo = join(tmpdir(), `baileys-tts-${randomUUID()}.mp3`);
+    const buffer = Buffer.from(await opusResponse.arrayBuffer());
+    const rutaArchivo = join(tmpdir(), `baileys-tts-${randomUUID()}.ogg`);
     await writeFile(rutaArchivo, buffer);
 
     return rutaArchivo;
