@@ -191,12 +191,12 @@ function TarjetaProducto({ producto }: { producto: Producto }) {
 
       <div className="mt-3 flex flex-wrap gap-1.5">
         {/*
-          Sin capture="environment" el móvil permite elegir entre cámara y galería
+          Sin capture permite elegir desde cualquier ubicación del dispositivo
         */}
         <input
           ref={entrada}
           type="file"
-          accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+          accept="image/*"
           className="hidden"
           onChange={elegirFoto}
         />
