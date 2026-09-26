@@ -16,6 +16,8 @@ import { confirmarPeligro, avisar, avisarError } from '../utilidades/alertas.js'
 
 export function Productos() {
   const [mostrarForm, setMostrarForm] = useState(false);
+  const [busqueda, setBusqueda] = useState('');
+  const [categoriaSeleccionada, setCategoriaSeleccionada] = useState('');
   const entradaExcel = useRef<HTMLInputElement>(null);
   const [resultadoImportacion, setResultadoImportacion] = useState<{
     filasLeidas: number;
@@ -27,6 +29,19 @@ export function Productos() {
   const importarExcel = useImportarProductosExcel();
 
   const visibles = productos.data?.filter((p) => p.visible).length ?? 0;
+  const textoBusqueda = busqueda.trim().toLocaleLowerCase('es');
+  const categorias = [...new Set(
+    (productos.data ?? [])
+      .map((producto) => producto.categoria?.trim())
+      .filter((categoria): categoria is string => Boolean(categoria)),
+  )].sort((a, b) => a.localeCompare(b, 'es'));
+  const productosFiltrados = (productos.data ?? []).filter((producto) => {
+    const textoProducto = `${producto.nombre} ${producto.descripcion ?? ''} ${producto.categoria ?? ''}`
+      .toLocaleLowerCase('es');
+    const coincideTexto = !textoBusqueda || textoProducto.includes(textoBusqueda);
+    const coincideCategoria = !categoriaSeleccionada || producto.categoria?.trim() === categoriaSeleccionada;
+    return coincideTexto && coincideCategoria;
+  });
 
   async function importarArchivo(evento: ChangeEvent<HTMLInputElement>) {
     const archivo = evento.target.files?.[0];
@@ -132,11 +147,57 @@ export function Productos() {
         </div>
       )}
 
+      <section className="tarjeta space-y-3" aria-label="Buscar productos del catalogo">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <label className="min-w-0 flex-1 text-sm font-medium text-slate-700">
+            Buscar producto
+            <input
+              type="search"
+              value={busqueda}
+              onChange={(evento) => setBusqueda(evento.target.value)}
+              placeholder="Nombre, descripcion o categoria"
+              className="campo mt-1"
+              aria-label="Buscar productos por nombre, descripcion o categoria"
+            />
+          </label>
+          <label className="sm:w-56 text-sm font-medium text-slate-700">
+            Categoria
+            <select
+              value={categoriaSeleccionada}
+              onChange={(evento) => setCategoriaSeleccionada(evento.target.value)}
+              className="campo mt-1"
+              aria-label="Filtrar productos por categoria"
+            >
+              <option value="">Todas las categorias</option>
+              {categorias.map((categoria) => (
+                <option key={categoria} value={categoria}>{categoria}</option>
+              ))}
+            </select>
+          </label>
+          {(busqueda || categoriaSeleccionada) && (
+            <button
+              type="button"
+              onClick={() => { setBusqueda(''); setCategoriaSeleccionada(''); }}
+              className="h-10 shrink-0 rounded-lg border border-slate-200 px-3 text-sm font-medium text-slate-600 transition hover:bg-slate-50"
+            >
+              Limpiar
+            </button>
+          )}
+        </div>
+        <p className="text-xs text-slate-500" aria-live="polite">
+          Mostrando {productosFiltrados.length} de {productos.data?.length ?? 0} productos
+        </p>
+      </section>
+
       {productos.isLoading && <Cargando />}
       {productos.data?.length === 0 && <Vacio>Todavia no hay productos.</Vacio>}
 
+      {productos.data && productos.data.length > 0 && productosFiltrados.length === 0 && (
+        <Vacio>No hay productos que coincidan con la busqueda o categoria seleccionada.</Vacio>
+      )}
+
       <div className="grid gap-3 sm:grid-cols-2">
-        {productos.data?.map((producto) => (
+        {productosFiltrados.map((producto) => (
           <TarjetaProducto key={producto.id} producto={producto} />
         ))}
       </div>
