@@ -104,54 +104,54 @@ function tarjetaProducto(
 
   // Construir galería de imágenes si hay múltiples
   const galeria = imagenes.length > 1
-    ? `<div class="galeria">${imagenes.map((img, idx) =>
-        `<img src="${escAttr(img.miniaturaUrl)}" alt="${escAttr(producto.nombre)} ${idx + 1}" loading="lazy" class="miniatura" onclick="cambiarImagen_${idSeguro}(${idx})">`
+    ? `<div class="galeria" aria-label="Fotos de ${escAttr(producto.nombre)}">${imagenes.map((img, idx) =>
+        `<button type="button" class="miniatura-boton" aria-label="Ver foto ${idx + 1} de ${escAttr(producto.nombre)}" onclick="cambiarImagen_${idSeguro}(${idx})"><img src="${escAttr(img.miniaturaUrl)}" alt="" loading="lazy" class="miniatura"></button>`
       ).join('')}</div>`
     : '';
 
   // Preparar datos para compartir (escapados para JavaScript)
   const nombreJS = escJS(producto.nombre);
-  const descripcionJS = producto.descripcion ? escJS(producto.descripcion) : '';
+  const precioPrincipal = producto.precioContado > 0 ? producto.precioContado : producto.precioCredicontado > 0 ? producto.precioCredicontado : producto.precioCredito;
+  const etiquetaPrincipal = producto.precioContado > 0 ? 'Precio de contado' : producto.precioCredicontado > 0 ? 'Precio credicontado' : 'Precio a credito';
 
   return `
-    <article class="producto${producto.disponible ? '' : ' agotado'}" data-nombre="${escAttr(producto.nombre.toLowerCase())}" data-categoria="${escAttr(producto.categoria || '')}" data-precio-min="${producto.precioContado || producto.precioCredicontado || producto.precioCredito}">
+    <article class="producto${producto.disponible ? '' : ' agotado'}" data-busqueda="${escAttr(`${producto.nombre} ${producto.descripcion || ''} ${producto.categoria || ''}`.toLocaleLowerCase('es'))}" data-categoria="${escAttr(producto.categoria || '')}" ${ajustes.mostrarPrecios ? `data-precio-min="${precioPrincipal}"` : ''}>
+      <div class="producto-media">
       ${producto.esNuevo || producto.enPromocion ? `
       <div class="badges">
-        ${producto.esNuevo ? '<span class="badge badge-nuevo">🆕 Nuevo</span>' : ''}
-        ${producto.enPromocion ? '<span class="badge badge-promo">🔥 Promoción</span>' : ''}
+        ${producto.esNuevo ? '<span class="badge badge-nuevo">Nuevo</span>' : ''}
+        ${producto.enPromocion ? '<span class="badge badge-promo">Promocion</span>' : ''}
       </div>
       ` : ''}
+      ${producto.disponible ? '' : '<span class="etiqueta-agotado">Agotado</span>'}
       ${
         imagenPrincipal
-          ? `<img id="img-${idSeguro}" src="${escAttr(imagenPrincipal)}" alt="${escAttr(producto.nombre)}" loading="lazy" class="imagen-principal">`
-          : '<div class="sin-foto">Sin foto</div>'
+          ? `<img id="img-${idSeguro}" src="${escAttr(imagenPrincipal)}" alt="${escAttr(producto.nombre)}" loading="lazy" class="imagen-principal" role="button" tabindex="0" aria-label="Ampliar imagen de ${escAttr(producto.nombre)}" onclick="abrirVistaImagen_${idSeguro}()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();abrirVistaImagen_${idSeguro}()}">`
+          : '<div class="sin-foto">Imagen no disponible</div>'
       }
+      </div>
       ${galeria}
       <div class="datos">
+        ${producto.categoria ? `<p class="categoria-producto">${esc(producto.categoria)}</p>` : ''}
         <h2>${esc(producto.nombre)}</h2>
         ${producto.descripcion ? `<p class="desc">${esc(producto.descripcion)}</p>` : ''}
-        ${ajustes.mostrarPrecios && (producto.precioContado || producto.precioCredicontado || producto.precioCredito) ? `
+        ${ajustes.mostrarPrecios && precioPrincipal > 0 ? `
           <div class="precios">
-            ${producto.precioContado > 0 ? `<p class="precio-item"><span class="etiq">Contado:</span> <span class="valor">${esc(formatearPesos(producto.precioContado))}</span></p>` : ''}
-            ${producto.precioCredicontado > 0 ? `<p class="precio-item"><span class="etiq">Credicontado:</span> <span class="valor">${esc(formatearPesos(producto.precioCredicontado))}</span></p>` : ''}
-            ${producto.precioCredito > 0 ? `<p class="precio-item"><span class="etiq">Crédito:</span> <span class="valor">${esc(formatearPesos(producto.precioCredito))}</span></p>` : ''}
-            ${producto.inicial > 0 ? `<p class="precio-item"><span class="etiq">Inicial:</span> <span class="valor">${esc(formatearPesos(producto.inicial))}</span></p>` : ''}
+            <p class="precio-principal"><span class="etiq">${etiquetaPrincipal}</span><strong>${esc(formatearPesos(precioPrincipal))}</strong></p>
+            ${producto.precioContado > 0 && producto.precioCredicontado > 0 ? `<p class="precio-item"><span>Credicontado</span><strong>${esc(formatearPesos(producto.precioCredicontado))}</strong></p>` : ''}
+            ${producto.precioCredito > 0 && producto.precioCredito !== precioPrincipal ? `<p class="precio-item"><span>Credito</span><strong>${esc(formatearPesos(producto.precioCredito))}</strong></p>` : ''}
+            ${producto.inicial > 0 ? `<p class="precio-item"><span>Inicial</span><strong>${esc(formatearPesos(producto.inicial))}</strong></p>` : ''}
             ${pagoSemanal > 0 ? `
               <div class="pagos">
-                <p class="pago-item">${esc(formatearPesos(pagoSemanal))} semanal</p>
-                <p class="pago-item">${esc(formatearPesos(pagoQuincenal))} quincenal</p>
-                <p class="pago-item">${esc(formatearPesos(pagoMensual))} mensual</p>
+                <span>Pago semanal</span><strong>${esc(formatearPesos(pagoSemanal))}</strong>
               </div>
             ` : ''}
           </div>
         ` : ''}
-        ${producto.disponible ? '' : '<p class="aviso">Agotado</p>'}
-        ${
-          enlace && producto.disponible
-            ? `<a class="boton" href="${escAttr(enlace)}" target="_blank" rel="noopener">Preguntar por WhatsApp</a>`
-            : ''
-        }
-        <button class="boton-quiero" onclick="mostrarFormulario_${idSeguro}()">¡Quiero este!</button>
+        <div class="acciones-producto">
+          ${producto.disponible ? `<button type="button" class="boton-quiero" onclick="mostrarFormulario_${idSeguro}()">Solicitar producto <span aria-hidden="true">&rarr;</span></button>` : ''}
+          ${enlace && producto.disponible ? `<a class="boton" href="${escAttr(enlace)}" target="_blank" rel="noopener">Consultar por WhatsApp</a>` : ''}
+        </div>
       </div>
     </article>
 
@@ -160,7 +160,7 @@ function tarjetaProducto(
       <div class="modal-contenido">
         <div class="modal-header">
           <h3>Solicitar: ${esc(producto.nombre)}</h3>
-          <button class="cerrar" onclick="cerrarModal_${idSeguro}()">×</button>
+          <button type="button" class="cerrar" aria-label="Cerrar formulario" onclick="cerrarModal_${idSeguro}()">&times;</button>
         </div>
         <form id="form-${idSeguro}">
           <div class="form-group">
@@ -222,7 +222,25 @@ function tarjetaProducto(
         window.cambiarImagen_${idSeguro} = function(idx) {
           const imagenes = ${JSON.stringify(imagenes.map(i => i.imagenUrl))};
           const img = document.getElementById('img-${idSeguro}');
-          if (img) img.src = imagenes[idx];
+          if (img) {
+            img.src = imagenes[idx];
+            window.__indiceImagen_${idSeguro} = idx;
+          }
+        };
+
+        // Abrir la foto actual en el visor de pantalla completa.
+        window.abrirVistaImagen_${idSeguro} = function() {
+          const imagen = document.getElementById('img-${idSeguro}');
+          const visor = document.getElementById('visor-imagen');
+          const imagenAmpliada = document.getElementById('imagen-ampliada');
+          if (!imagen || !visor || !imagenAmpliada) return;
+          window.__visorImagenes = ${JSON.stringify(imagenes.map(i => i.imagenUrl))};
+          window.__visorImagenActual = window.__indiceImagen_${idSeguro} || 0;
+          imagenAmpliada.src = imagen.src;
+          imagenAmpliada.alt = imagen.alt;
+          visor.classList.add('activo');
+          document.body.classList.add('visor-abierto');
+          actualizarNavegacionImagen();
         };
 
         // Función para mostrar el modal
@@ -288,6 +306,7 @@ function tarjetaProducto(
           ${producto.precioCredito > 0 ? `mensaje += '• Crédito: ${formatearPesos(producto.precioCredito).replace(/'/g, "\\'")}\\n';` : ''}
 
           // Enviar por WhatsApp
+          // El cliente elige el contacto desde su propia cuenta de WhatsApp.
           const whatsappUrl = 'https://wa.me/?text=' + encodeURIComponent(mensaje);
           window.open(whatsappUrl, '_blank');
           cerrarModal_${idSeguro}();
@@ -299,70 +318,90 @@ function tarjetaProducto(
 /** Estilos en linea: una sola peticion, sin CSS aparte que retrase la carga. */
 const ESTILOS = `
   *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:linear-gradient(135deg,#f5f7fa 0%,#e8eef5 100%);color:#1c1917;line-height:1.5;min-height:100vh}
-  header{background:linear-gradient(135deg,#1e3a8a 0%,#1e40af 100%);padding:8px 20px;text-align:center;box-shadow:0 2px 8px rgba(30,58,138,.2);position:sticky;top:0;z-index:100}
-  .logo-container{display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:2px}
-  .logo{max-width:45px;max-height:45px;object-fit:contain}
-  header h1{font-size:18px;margin-bottom:2px;color:#fff;font-weight:700}
-  header p{color:#e0e7ff;font-size:12px}
-  .filtros-container{background:linear-gradient(135deg,#1e3a8a 0%,#1e40af 100%);padding:16px;box-shadow:0 2px 4px rgba(30,58,138,.15)}
+  body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:#f7f8fa;color:#172033;line-height:1.5;min-height:100vh}
+  header{background:linear-gradient(135deg,#102a43 0%,#176b87 100%);padding:30px 20px 34px;text-align:center;box-shadow:0 4px 16px rgba(16,42,67,.18);position:relative;z-index:100}
+  .logo-container{display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:10px}
+  .logo{max-width:64px;max-height:64px;object-fit:contain}
+  header h1{font-size:clamp(26px,4vw,40px);line-height:1.1;margin-bottom:8px;color:#fff;font-weight:800;letter-spacing:0}
+  header p{color:#d8f3f7;font-size:15px;max-width:620px;margin:0 auto}
+  .filtros-container{background:#fff;padding:18px 20px;box-shadow:0 2px 8px rgba(16,42,67,.08);border-bottom:1px solid #e5eaf0}
   .filtros{max-width:1400px;margin:0 auto;display:flex;gap:12px;flex-wrap:wrap;align-items:center}
-  .busqueda{flex:1;min-width:250px;padding:10px 14px;border:2px solid #3b82f6;border-radius:8px;font-size:14px;transition:all .2s ease;background:#fff}
-  .busqueda:focus{outline:none;border-color:#60a5fa;box-shadow:0 0 0 4px rgba(96,165,250,.2)}
-  .filtro-precio{padding:9px 12px;border:2px solid #3b82f6;border-radius:8px;font-size:14px;min-width:150px;transition:all .2s ease;background:#fff}
-  .filtro-precio:focus{outline:none;border-color:#60a5fa}
-  .boton-limpiar{padding:9px 18px;background:#fff;border:2px solid #3b82f6;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;transition:all .2s ease;color:#1e40af}
-  .boton-limpiar:hover{background:#eff6ff;border-color:#60a5fa}
-  .resultados-info{padding:12px 20px;text-align:center;color:#1e40af;font-size:14px;font-weight:600}
-  .info-footer{background:linear-gradient(135deg,#1e3a8a 0%,#1e40af 100%);padding:32px 20px;margin-top:32px;color:#fff}
+  .busqueda{flex:1;min-width:250px;padding:12px 15px;border:1px solid #cbd5df;border-radius:9px;font-size:14px;transition:all .2s ease;background:#fff}
+  .busqueda:focus{outline:none;border-color:#1d8a9d;box-shadow:0 0 0 4px rgba(29,138,157,.12)}
+  .filtro-precio{padding:11px 12px;border:1px solid #cbd5df;border-radius:9px;font-size:14px;min-width:160px;transition:all .2s ease;background:#fff;color:#334155}
+  .filtro-precio:focus{outline:none;border-color:#1d8a9d}
+  .boton-limpiar{padding:11px 17px;background:#f0f7f8;border:1px solid #b8d9dd;border-radius:9px;font-size:14px;font-weight:700;cursor:pointer;transition:all .2s ease;color:#146273}
+  .boton-limpiar:hover{background:#dff1f3;border-color:#7fc1c8}
+  .resultados-info{padding:12px 20px;text-align:center;color:#39707c;font-size:13px;font-weight:600}
+  .info-footer{background:#102a43;padding:38px 20px 0;margin-top:42px;color:#fff}
   .footer-content{max-width:1200px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:28px}
   .footer-section h3{font-size:16px;font-weight:700;color:#fff;margin-bottom:10px}
-  .footer-section p,.footer-section a{font-size:14px;color:#e0e7ff;line-height:1.8;text-decoration:none}
+  .footer-section p,.footer-section a{font-size:14px;color:#cfe1e8;line-height:1.8;text-decoration:none}
   .footer-section a:hover{color:#fff}
-  .contacto-item{display:flex;align-items:center;gap:8px;margin-bottom:8px;color:#e0e7ff}
+  .contacto-item{display:flex;align-items:center;gap:8px;margin-bottom:8px;color:#cfe1e8}
   .icono{font-size:18px}
-  .whatsapp-footer{display:inline-flex;align-items:center;gap:8px;background:linear-gradient(135deg,#25D366 0%,#128C7E 100%);color:#fff;padding:10px 18px;border-radius:8px;font-weight:600;margin-top:10px;transition:all .2s ease}
+  .whatsapp-footer{display:inline-flex;align-items:center;gap:8px;background:#25a56a;color:#fff;padding:10px 18px;border-radius:8px;font-weight:700;margin-top:10px;transition:all .2s ease}
   .whatsapp-footer:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(37,211,102,.4);color:#fff}
   .footer-bottom{text-align:center;padding:16px;color:#c7d2fe;font-size:13px;border-top:1px solid rgba(255,255,255,.1)}
-  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:24px;padding:32px 20px;max-width:1400px;margin:0 auto}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:22px;padding:28px 20px;max-width:1280px;margin:0 auto}
   @media(max-width:768px){.grid{grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:20px;padding:20px 16px}}
   @media(min-width:1200px){.grid{grid-template-columns:repeat(auto-fill,minmax(320px,1fr))}}
-  .producto{background:#fff;border-radius:16px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 4px 12px rgba(0,0,0,.08);transition:all .3s ease;border:1px solid rgba(0,0,0,.05);position:relative}
-  .producto:hover{transform:translateY(-4px);box-shadow:0 12px 24px rgba(0,0,0,.12)}
+  @keyframes entradaTarjeta{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+  .producto{background:#fff;border-radius:12px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 2px 8px rgba(16,42,67,.08);transition:transform .25s ease,box-shadow .25s ease,border-color .25s ease;border:1px solid #e5eaf0;position:relative;animation:entradaTarjeta .5s ease both}
+  .producto:nth-child(2){animation-delay:.04s}.producto:nth-child(3){animation-delay:.08s}.producto:nth-child(4){animation-delay:.12s}.producto:nth-child(5){animation-delay:.16s}.producto:nth-child(6){animation-delay:.2s}
+  .producto:hover{transform:translateY(-3px);box-shadow:0 10px 24px rgba(16,42,67,.14)}
   .producto.oculto{display:none}
   .badges{position:absolute;top:12px;right:12px;z-index:10;display:flex;flex-direction:column;gap:6px}
-  .badge{padding:6px 12px;border-radius:6px;font-size:12px;font-weight:700;box-shadow:0 2px 8px rgba(0,0,0,.15)}
-  .badge-nuevo{background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:#fff}
-  .badge-promo{background:linear-gradient(135deg,#ef4444 0%,#dc2626 100%);color:#fff}
-  .producto.agotado{opacity:.6}
-  .producto .imagen-principal{width:100%;height:320px;object-fit:contain;background:#f5f5f4;display:block;cursor:pointer;transition:transform .3s ease;padding:8px}
+  .badge{padding:5px 10px;border-radius:999px;font-size:11px;font-weight:800;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+  .badge-nuevo{background:#176b87;color:#fff}
+  .badge-promo{background:#d97706;color:#fff}
+  .producto.agotado{opacity:.78}
+  .producto-media{position:relative;background:#f2f7f8}
+  .etiqueta-agotado{position:absolute;left:12px;bottom:12px;z-index:2;background:#334155;color:#fff;padding:5px 9px;border-radius:5px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
+  .producto .imagen-principal{width:100%;height:280px;object-fit:contain;background:#f2f7f8;display:block;cursor:pointer;transition:transform .3s ease;padding:12px}
   .producto:hover .imagen-principal{transform:scale(1.02)}
-  .sin-foto{width:100%;height:320px;display:flex;align-items:center;justify-content:center;color:#a8a29e;font-size:14px;background:linear-gradient(135deg,#e7e5e4 0%,#d6d3d1 100%)}
+  .sin-foto{width:100%;height:280px;display:flex;align-items:center;justify-content:center;color:#78909c;font-size:14px;background:#e8f0f2}
   @media(max-width:768px){.producto .imagen-principal{height:280px;object-fit:contain;padding:12px}}
-  .galeria{display:flex;gap:6px;padding:12px;overflow-x:auto;background:#fafaf9;border-bottom:1px solid #f5f5f4}
-  .miniatura{width:60px;height:60px;object-fit:cover;border-radius:8px;cursor:pointer;border:2px solid transparent;transition:all .2s ease}
-  .miniatura:hover{border-color:#16a34a;transform:scale(1.05)}
-  .datos{padding:16px;display:flex;flex-direction:column;gap:10px;flex:1}
-  .datos h2{font-size:16px;font-weight:700;color:#0f172a}
-  .desc{font-size:13px;color:#64748b;line-height:1.5}
-  .precios{background:linear-gradient(135deg,#f0fdf4 0%,#dcfce7 100%);padding:12px;border-radius:8px;font-size:13px;border:1px solid #bbf7d0}
-  .precio-item{display:flex;justify-content:space-between;margin-bottom:6px;align-items:center}
-  .precio-item .etiq{color:#15803d;font-weight:600;font-size:12px}
-  .precio-item .valor{color:#15803d;font-weight:700;font-size:14px}
-  .pagos{margin-top:8px;padding-top:8px;border-top:2px solid #bbf7d0;display:flex;flex-direction:column;gap:3px}
-  .pago-item{color:#15803d;font-size:12px;font-weight:500;padding:3px 6px;background:#f0fdf4;border-radius:4px;text-align:center}
+  .galeria{display:flex;gap:6px;padding:9px 12px;overflow-x:auto;background:#fff;border-bottom:1px solid #edf1f3}
+  .miniatura-boton{border:0;padding:0;background:transparent;cursor:pointer;border-radius:6px}
+  .miniatura{width:52px;height:52px;object-fit:cover;border-radius:6px;border:2px solid transparent;transition:all .2s ease;display:block}
+  .miniatura-boton:hover .miniatura{border-color:#1d8a9d;transform:scale(1.04)}
+  .datos{padding:18px;display:flex;flex-direction:column;gap:9px;flex:1}
+  .categoria-producto{font-size:11px;color:#176b87;font-weight:800;text-transform:uppercase;letter-spacing:.08em}
+  .datos h2{font-size:18px;line-height:1.25;font-weight:800;color:#172033}
+  .desc{font-size:13px;color:#66778a;line-height:1.5}
+  .precios{background:#f2faf8;padding:13px;border-radius:8px;font-size:13px;border:1px solid #cce8df}
+  .precio-principal{display:flex;flex-direction:column;gap:2px;margin-bottom:10px}
+  .precio-principal .etiq{color:#4f6872;font-size:11px;font-weight:700}
+  .precio-principal strong{color:#176b59;font-size:22px;line-height:1.1}
+  .precio-item{display:flex;justify-content:space-between;margin-bottom:6px;align-items:center;color:#59707a}
+  .precio-item strong{color:#176b59;font-size:13px}
+  .pagos{margin-top:8px;padding-top:9px;border-top:1px solid #cce8df;display:flex;justify-content:space-between;align-items:center;color:#59707a;font-size:12px}
+  .pagos strong{color:#176b59;font-size:14px}
   .aviso{font-size:12px;color:#dc2626;font-weight:700;text-align:center;padding:6px;background:#fef2f2;border-radius:6px}
-  .boton{display:block;text-align:center;background:#16a34a;color:#fff;text-decoration:none;padding:10px;border-radius:8px;font-size:13px;font-weight:700;border:none;cursor:pointer;margin-bottom:6px;transition:all .2s ease}
-  .boton:hover{background:#15803d;transform:translateY(-1px);box-shadow:0 4px 8px rgba(22,163,74,.2)}
-  .boton:active{background:#15803d;transform:translateY(0)}
-  .boton-quiero{display:block;width:100%;text-align:center;background:linear-gradient(135deg,#0ea5e9 0%,#0284c7 100%);color:#fff;padding:12px;border-radius:10px;font-size:14px;font-weight:700;border:none;cursor:pointer;transition:all .2s ease;box-shadow:0 4px 12px rgba(14,165,233,.2)}
-  .boton-quiero:hover{transform:translateY(-2px);box-shadow:0 6px 16px rgba(14,165,233,.3)}
-  .boton-quiero:active{background:linear-gradient(135deg,#0284c7 0%,#0369a1 100%);transform:translateY(0)}
+  .acciones-producto{margin-top:auto;padding-top:4px}
+  .boton{display:block;text-align:center;background:#25a56a;color:#fff;text-decoration:none;padding:10px;border-radius:8px;font-size:13px;font-weight:700;border:none;cursor:pointer;margin-top:7px;transition:all .2s ease}
+  .boton:hover{background:#1c8153;transform:translateY(-1px);box-shadow:0 4px 8px rgba(37,165,106,.2)}
+  .boton-quiero{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;text-align:center;background:#176b87;color:#fff;padding:12px;border-radius:8px;font-size:14px;font-weight:800;border:none;cursor:pointer;transition:all .2s ease}
+  .boton-quiero:hover{background:#12556c;transform:translateY(-1px);box-shadow:0 5px 12px rgba(23,107,135,.24)}
   footer{text-align:center;padding:40px 20px;color:#78716c;font-size:14px;background:#fff;border-top:1px solid #e7e5e4;margin-top:32px}
   .vacio{text-align:center;padding:80px 20px;color:#78716c;font-size:16px}
-  .modal{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.6);z-index:1000;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)}
-  .modal.activo{display:flex}
-  .modal-contenido{background:#fff;border-radius:16px;max-width:520px;width:100%;max-height:90vh;overflow-y:auto;padding:28px;box-shadow:0 20px 40px rgba(0,0,0,.15)}
+  .modal{display:flex;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.6);z-index:1000;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px);opacity:0;visibility:hidden;pointer-events:none;transition:opacity .25s ease,visibility .25s ease}
+  .modal.activo{opacity:1;visibility:visible;pointer-events:auto}
+  .modal-contenido{background:#fff;border-radius:16px;max-width:520px;width:100%;max-height:90vh;overflow-y:auto;padding:28px;box-shadow:0 20px 40px rgba(0,0,0,.15);transform:translateY(14px) scale(.98);transition:transform .3s cubic-bezier(.2,.8,.2,1)}
+  .modal.activo .modal-contenido{transform:translateY(0) scale(1)}
+  .visor-imagen{position:fixed;inset:0;z-index:1100;display:flex;align-items:center;justify-content:center;padding:28px;background:rgba(8,24,38,.88);opacity:0;visibility:hidden;pointer-events:none;transition:opacity .25s ease,visibility .25s ease}
+  .visor-imagen.activo{opacity:1;visibility:visible;pointer-events:auto}
+  .visor-imagen img{max-width:min(94vw,1200px);max-height:88vh;width:auto;height:auto;object-fit:contain;border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,.45);transform:scale(.96);transition:transform .3s cubic-bezier(.2,.8,.2,1)}
+  .visor-imagen.activo img{transform:scale(1)}
+  .visor-flecha{position:absolute;top:50%;transform:translateY(-50%);width:46px;height:46px;border:1px solid rgba(255,255,255,.35);border-radius:50%;background:rgba(255,255,255,.12);color:#fff;font-size:30px;line-height:1;cursor:pointer;transition:background .2s ease,transform .2s ease;display:none;align-items:center;justify-content:center}
+  .visor-flecha:hover{background:rgba(255,255,255,.25)}
+  .visor-flecha:active{transform:translateY(-50%) scale(.94)}
+  .visor-flecha.visible{display:flex}
+  .visor-anterior{left:18px}.visor-siguiente{right:18px}
+  .visor-cerrar{position:absolute;top:18px;right:20px;width:42px;height:42px;border:1px solid rgba(255,255,255,.35);border-radius:50%;background:rgba(255,255,255,.12);color:#fff;font-size:28px;line-height:1;cursor:pointer;transition:background .2s ease,transform .2s ease}
+  .visor-cerrar:hover{background:rgba(255,255,255,.25);transform:scale(1.06)}
+  .visor-abierto{overflow:hidden}
   .modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;padding-bottom:16px;border-bottom:2px solid #f5f5f4}
   .modal-header h3{font-size:20px;font-weight:700;color:#0f172a}
   .cerrar{background:#f5f5f4;border:none;font-size:24px;cursor:pointer;color:#78716c;padding:0;width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:8px;transition:all .2s ease}
@@ -380,6 +419,7 @@ const ESTILOS = `
   .boton-cancelar{width:100%;background:#f5f5f4;color:#57534e;padding:12px;border-radius:8px;font-size:14px;font-weight:600;border:none;cursor:pointer;margin-top:12px;transition:all .2s ease}
   .boton-cancelar:hover{background:#e7e5e4}
   @media(max-width:768px){.footer-content{grid-template-columns:1fr;text-align:center}}
+  @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}}
 `;
 
 export function paginaCatalogo(opciones: {
@@ -418,10 +458,18 @@ export function paginaCatalogo(opciones: {
       ? `<div class="grid" id="grid-productos">${productos.map((p) => tarjetaProducto(p, ajustes, urlPublica)).join('')}</div>`
       : '<p class="vacio">Todavia no hay productos publicados.</p>';
 
+  const visorImagen = `
+  <div class="visor-imagen" id="visor-imagen" role="dialog" aria-modal="true" aria-label="Vista ampliada de imagen" onclick="if(event.target===this)cerrarVistaImagen()">
+    <button type="button" class="visor-cerrar" aria-label="Cerrar imagen ampliada" onclick="cerrarVistaImagen()">&times;</button>
+    <button type="button" class="visor-flecha visor-anterior" id="visor-anterior" aria-label="Imagen anterior" onclick="cambiarVistaImagen(-1)">&lsaquo;</button>
+    <img id="imagen-ampliada" src="" alt="">
+    <button type="button" class="visor-flecha visor-siguiente" id="visor-siguiente" aria-label="Imagen siguiente" onclick="cambiarVistaImagen(1)">&rsaquo;</button>
+  </div>`;
+
   const barraFiltros = productos.length > 0 ? `
   <div class="filtros-container">
     <div class="filtros">
-      <input type="text" class="busqueda" id="busqueda" placeholder="🔍 Buscar productos...">
+      <input type="text" class="busqueda" id="busqueda" placeholder="Buscar productos..." aria-label="Buscar productos">
       <select class="filtro-precio" id="filtro-precio">
         <option value="">Todos los precios</option>
         <option value="0-100000">Hasta $100,000</option>
@@ -469,28 +517,29 @@ ${imagenPrevia ? `<meta property="og:image" content="${escAttr(imagenPrevia)}">`
 </header>
 ${barraFiltros}
 ${cuerpo}
+${visorImagen}
 <footer class="info-footer">
   <div class="footer-content">
     <div class="footer-section">
-      <h3>📍 ${esc(ajustes.nombreNegocio)}</h3>
+      <h3>${esc(ajustes.nombreNegocio)}</h3>
       <p>Tu aliado en créditos y productos de calidad. Facilitamos tus compras con las mejores opciones de pago.</p>
     </div>
 
     <div class="footer-section">
-      <h3>📞 Contacto</h3>
+      <h3>Contacto</h3>
       ${ajustes.whatsappNumero ? `
       <div class="contacto-item">
-        <span class="icono">📱</span>
+        <span class="icono" aria-hidden="true">+</span>
         <span>WhatsApp disponible</span>
       </div>
       <a href="https://wa.me/${escAttr(ajustes.whatsappNumero)}" target="_blank" rel="noopener" class="whatsapp-footer">
-        💬 Chatea con nosotros
+        Chatea con nosotros
       </a>
       ` : ''}
     </div>
 
     <div class="footer-section">
-      <h3>💳 Formas de Pago</h3>
+      <h3>Formas de pago</h3>
       <p>• Contado</p>
       <p>• Credicontado</p>
       <p>• Crédito (semanal, quincenal, mensual)</p>
@@ -498,7 +547,7 @@ ${cuerpo}
     </div>
 
     <div class="footer-section">
-      <h3>🛡️ ¿Cómo funciona?</h3>
+      <h3>Como funciona</h3>
       <p>1. Elige tu producto</p>
       <p>2. Selecciona tu forma de pago</p>
       <p>3. Completa el formulario</p>
@@ -512,6 +561,37 @@ ${cuerpo}
 
 ${productos.length > 0 ? `
 <script>
+  window.__visorImagenes = [];
+  window.__visorImagenActual = 0;
+
+  function actualizarNavegacionImagen() {
+    const hayVarias = window.__visorImagenes.length > 1;
+    document.getElementById('visor-anterior')?.classList.toggle('visible', hayVarias);
+    document.getElementById('visor-siguiente')?.classList.toggle('visible', hayVarias);
+  }
+
+  function cambiarVistaImagen(direccion) {
+    const imagenes = window.__visorImagenes;
+    if (imagenes.length < 2) return;
+    window.__visorImagenActual = (window.__visorImagenActual + direccion + imagenes.length) % imagenes.length;
+    const imagenAmpliada = document.getElementById('imagen-ampliada');
+    if (imagenAmpliada) imagenAmpliada.src = imagenes[window.__visorImagenActual];
+  }
+
+  function cerrarVistaImagen() {
+    const visor = document.getElementById('visor-imagen');
+    if (visor) {
+      visor.classList.remove('activo');
+      document.body.classList.remove('visor-abierto');
+    }
+  }
+
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') cerrarVistaImagen();
+    if (e.key === 'ArrowLeft') cambiarVistaImagen(-1);
+    if (e.key === 'ArrowRight') cambiarVistaImagen(1);
+  });
+
   // Sistema de búsqueda y filtros
   const busqueda = document.getElementById('busqueda');
   const filtroPrecio = document.getElementById('filtro-precio');
@@ -525,7 +605,7 @@ ${productos.length > 0 ? `
     let visibles = 0;
 
     productos.forEach(producto => {
-      const nombre = producto.getAttribute('data-nombre') || '';
+      const nombre = producto.getAttribute('data-busqueda') || '';
       const precioMin = parseInt(producto.getAttribute('data-precio-min')) || 0;
 
       // Filtro de búsqueda

@@ -3,13 +3,14 @@ import { formatearPesos, type Producto } from '@credito/shared';
 import {
   useProductos,
   useGuardarProducto,
+  useGenerarDescripcionProducto,
   useBorrarProducto,
   useSubirFoto,
   useQuitarFoto,
   useEnlaceCompartir,
 } from '../api/hooks.js';
 import { CampoDinero } from '../componentes/CampoDinero.js';
-import { Aviso, Boton, Cargando, Vacio } from '../componentes/base.js';
+import { Aviso, Boton, Cargando, Modal, Vacio } from '../componentes/base.js';
 import { confirmarPeligro, avisar, avisarError } from '../utilidades/alertas.js';
 
 export function Productos() {
@@ -84,9 +85,11 @@ function TarjetaProducto({ producto }: { producto: Producto }) {
   const subir = useSubirFoto();
   const quitar = useQuitarFoto();
   const guardar = useGuardarProducto();
+  const generarDescripcion = useGenerarDescripcionProducto();
   const borrar = useBorrarProducto();
   const [resultado, setResultado] = useState<string | null>(null);
   const [imagenSeleccionada, setImagenSeleccionada] = useState(0);
+  const [editando, setEditando] = useState(false);
 
   async function elegirFoto(evento: ChangeEvent<HTMLInputElement>) {
     const archivo = evento.target.files?.[0];
@@ -107,6 +110,22 @@ function TarjetaProducto({ producto }: { producto: Producto }) {
 
   const imagenes = producto.imagenes || [];
   const imagenActual = imagenes[imagenSeleccionada] || imagenes[0];
+
+  async function generarCopyProducto() {
+    try {
+      const respuesta = await generarDescripcion.mutateAsync({
+        nombre: producto.nombre,
+        categoria: producto.categoria,
+        precioContado: producto.precios.contado,
+        precioCredicontado: producto.precios.credicontado,
+        precioCredito: producto.precios.credito,
+      });
+      await guardar.mutateAsync({ id: producto.id, descripcion: respuesta.descripcion });
+      avisar('Descripcion generada y guardada');
+    } catch (error) {
+      avisarError(error);
+    }
+  }
 
   return (
     <div className="tarjeta">
@@ -142,6 +161,9 @@ function TarjetaProducto({ producto }: { producto: Producto }) {
 
         <div className="min-w-0 flex-1">
           <h3 className="truncate font-semibold">{producto.nombre}</h3>
+          {producto.descripcion && (
+            <p className="mt-1 line-clamp-2 text-xs text-slate-500">{producto.descripcion}</p>
+          )}
           <div className="text-sm space-y-0.5 mt-1">
             {producto.precios.contado > 0 && (
               <p className="text-slate-600">
@@ -202,6 +224,14 @@ function TarjetaProducto({ producto }: { producto: Producto }) {
         />
         <button
           type="button"
+          onClick={() => setEditando(true)}
+          className="rounded-lg border border-metal-200 bg-metal-50 px-2.5 py-1.5 text-xs font-semibold text-metal-700 hover:bg-metal-100"
+        >
+          Editar producto
+        </button>
+
+        <button
+          type="button"
           onClick={() => entrada.current?.click()}
           disabled={subir.isPending}
           className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium hover:bg-slate-50 disabled:opacity-50"
@@ -260,6 +290,15 @@ function TarjetaProducto({ producto }: { producto: Producto }) {
           className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium hover:bg-slate-50"
         >
           {producto.disponible ? 'Marcar agotado' : 'Marcar disponible'}
+        </button>
+
+        <button
+          type="button"
+          onClick={generarCopyProducto}
+          disabled={generarDescripcion.isPending || guardar.isPending}
+          className="rounded-lg border border-metal-200 bg-metal-50 px-2.5 py-1.5 text-xs font-semibold text-metal-700 hover:bg-metal-100 disabled:opacity-50"
+        >
+          {generarDescripcion.isPending ? 'Generando...' : producto.descripcion ? 'Regenerar copy IA' : 'Generar copy IA'}
         </button>
 
         <button
@@ -358,6 +397,16 @@ function TarjetaProducto({ producto }: { producto: Producto }) {
           Borrar
         </button>
       </div>
+
+      {editando && (
+        <Modal
+          titulo={`Editar ${producto.nombre}`}
+          ancho="amplio"
+          onCerrar={() => setEditando(false)}
+        >
+          <FormularioEditarProducto producto={producto} onListo={() => setEditando(false)} />
+        </Modal>
+      )}
     </div>
   );
 }
@@ -374,6 +423,7 @@ function FormularioProducto({ onListo }: { onListo: () => void }) {
   const [esNuevo, setEsNuevo] = useState(false);
   const [enPromocion, setEnPromocion] = useState(false);
   const guardar = useGuardarProducto();
+  const generarDescripcion = useGenerarDescripcionProducto();
 
   async function enviar(evento: FormEvent) {
     evento.preventDefault();
@@ -391,6 +441,26 @@ function FormularioProducto({ onListo }: { onListo: () => void }) {
       enPromocion,
     });
     onListo();
+  }
+
+  async function generarCopy() {
+    if (!nombre.trim()) {
+      avisar('Escribe el nombre del producto para generar su descripcion.');
+      return;
+    }
+
+    try {
+      const respuesta = await generarDescripcion.mutateAsync({
+        nombre,
+        categoria: categoria || null,
+        precioContado,
+        precioCredicontado,
+        precioCredito,
+      });
+      setDescripcion(respuesta.descripcion);
+    } catch (error) {
+      avisarError(error);
+    }
   }
 
   const pagoQuincenal = pagoSemanal * 2;
@@ -434,9 +504,19 @@ function FormularioProducto({ onListo }: { onListo: () => void }) {
       </div>
 
       <div>
-        <label className="etiqueta" htmlFor="desc-prod">
-          Descripcion
-        </label>
+        <div className="mb-1.5 flex items-center justify-between gap-3">
+          <label className="etiqueta" htmlFor="desc-prod">
+            Descripcion
+          </label>
+          <button
+            type="button"
+            onClick={generarCopy}
+            disabled={generarDescripcion.isPending || !nombre.trim()}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-metal-200 bg-metal-50 px-2.5 py-1.5 text-xs font-semibold text-metal-700 transition hover:bg-metal-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {generarDescripcion.isPending ? 'Generando...' : 'Generar con IA'}
+          </button>
+        </div>
         <textarea
           id="desc-prod"
           className="campo"
@@ -493,6 +573,206 @@ function FormularioProducto({ onListo }: { onListo: () => void }) {
       <div className="flex gap-2">
         <Boton submit cargando={guardar.isPending} deshabilitado={!nombre.trim()}>
           Guardar producto
+        </Boton>
+        <Boton tipo="secundario" onClick={onListo}>
+          Cancelar
+        </Boton>
+      </div>
+    </form>
+  );
+}
+
+function FormularioEditarProducto({
+  producto,
+  onListo,
+}: {
+  producto: Producto;
+  onListo: () => void;
+}) {
+  const [nombre, setNombre] = useState(producto.nombre);
+  const [descripcion, setDescripcion] = useState(producto.descripcion ?? '');
+  const [precioContado, setPrecioContado] = useState(producto.precios.contado);
+  const [precioCredicontado, setPrecioCredicontado] = useState(producto.precios.credicontado);
+  const [precioCredito, setPrecioCredito] = useState(producto.precios.credito);
+  const [inicial, setInicial] = useState(producto.precios.inicial);
+  const [pagoSemanal, setPagoSemanal] = useState(producto.precios.pagoSemanal);
+  const [categoria, setCategoria] = useState(producto.categoria ?? '');
+  const [visible, setVisible] = useState(producto.visible);
+  const [disponible, setDisponible] = useState(producto.disponible);
+  const [esNuevo, setEsNuevo] = useState(producto.esNuevo);
+  const [enPromocion, setEnPromocion] = useState(producto.enPromocion);
+  const [generando, setGenerando] = useState(false);
+  const guardar = useGuardarProducto();
+  const generarDescripcion = useGenerarDescripcionProducto();
+
+  async function enviar(evento: FormEvent) {
+    evento.preventDefault();
+    try {
+      await guardar.mutateAsync({
+        id: producto.id,
+        nombre,
+        descripcion: descripcion || null,
+        precioContado,
+        precioCredicontado,
+        precioCredito,
+        inicial,
+        pagoSemanal,
+        precio: precioContado || precioCredicontado || precioCredito,
+        categoria: categoria || null,
+        visible,
+        disponible,
+        esNuevo,
+        enPromocion,
+      });
+      avisar('Producto actualizado');
+      onListo();
+    } catch (error) {
+      avisarError(error);
+    }
+  }
+
+  async function generarCopy() {
+    if (!nombre.trim()) {
+      avisar('Escribe el nombre del producto para generar su descripcion.');
+      return;
+    }
+
+    setGenerando(true);
+    try {
+      const respuesta = await generarDescripcion.mutateAsync({
+        nombre,
+        categoria: categoria || null,
+        precioContado,
+        precioCredicontado,
+        precioCredito,
+      });
+      setDescripcion(respuesta.descripcion);
+    } catch (error) {
+      avisarError(error);
+    } finally {
+      setGenerando(false);
+    }
+  }
+
+  const pagoQuincenal = pagoSemanal * 2;
+  const pagoMensual = pagoSemanal * 4;
+
+  return (
+    <form onSubmit={enviar} className="space-y-3">
+      <Aviso error={guardar.error} />
+
+      <div>
+        <label className="etiqueta" htmlFor={`editar-nombre-${producto.id}`}>
+          Nombre <span className="text-red-600">*</span>
+        </label>
+        <input
+          id={`editar-nombre-${producto.id}`}
+          type="text"
+          className="campo"
+          value={nombre}
+          onChange={(e) => setNombre(e.target.value)}
+          maxLength={150}
+          required
+        />
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <CampoDinero etiqueta="Precio contado" valor={precioContado} onCambio={setPrecioContado} />
+        <CampoDinero etiqueta="Precio credicontado" valor={precioCredicontado} onCambio={setPrecioCredicontado} />
+        <CampoDinero etiqueta="Precio credito" valor={precioCredito} onCambio={setPrecioCredito} />
+        <CampoDinero etiqueta="Inicial" valor={inicial} onCambio={setInicial} />
+      </div>
+
+      <div>
+        <CampoDinero etiqueta="Pago semanal" valor={pagoSemanal} onCambio={setPagoSemanal} />
+        {pagoSemanal > 0 && (
+          <p className="mt-1 text-xs text-slate-500">
+            Quincenal: {formatearPesos(pagoQuincenal)} • Mensual: {formatearPesos(pagoMensual)}
+          </p>
+        )}
+      </div>
+
+      <div>
+        <div className="mb-1.5 flex items-center justify-between gap-3">
+          <label className="etiqueta" htmlFor={`editar-descripcion-${producto.id}`}>
+            Descripcion
+          </label>
+          <button
+            type="button"
+            onClick={generarCopy}
+            disabled={generando || generarDescripcion.isPending || !nombre.trim()}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-metal-200 bg-metal-50 px-2.5 py-1.5 text-xs font-semibold text-metal-700 transition hover:bg-metal-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {generando ? 'Generando...' : 'Generar con IA'}
+          </button>
+        </div>
+        <textarea
+          id={`editar-descripcion-${producto.id}`}
+          className="campo"
+          rows={3}
+          value={descripcion}
+          onChange={(e) => setDescripcion(e.target.value)}
+          maxLength={1000}
+        />
+      </div>
+
+      <div>
+        <label className="etiqueta" htmlFor={`editar-categoria-${producto.id}`}>
+          Categoria
+        </label>
+        <input
+          id={`editar-categoria-${producto.id}`}
+          type="text"
+          className="campo"
+          value={categoria}
+          onChange={(e) => setCategoria(e.target.value)}
+          maxLength={60}
+        />
+      </div>
+
+      <div className="space-y-2">
+        <label className="etiqueta">Estado y badges</label>
+        <label className="flex cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            checked={visible}
+            onChange={(e) => setVisible(e.target.checked)}
+            className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+          />
+          <span className="text-sm text-slate-700">Mostrar en el catalogo publico</span>
+        </label>
+        <label className="flex cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            checked={disponible}
+            onChange={(e) => setDisponible(e.target.checked)}
+            className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+          />
+          <span className="text-sm text-slate-700">Producto disponible</span>
+        </label>
+        <label className="flex cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            checked={esNuevo}
+            onChange={(e) => setEsNuevo(e.target.checked)}
+            className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+          />
+          <span className="text-sm text-slate-700">Marcar como producto nuevo</span>
+        </label>
+        <label className="flex cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            checked={enPromocion}
+            onChange={(e) => setEnPromocion(e.target.checked)}
+            className="h-4 w-4 rounded border-slate-300 text-red-600 focus:ring-red-500"
+          />
+          <span className="text-sm text-slate-700">Marcar como promocion</span>
+        </label>
+      </div>
+
+      <div className="flex gap-2 pt-2">
+        <Boton submit cargando={guardar.isPending} deshabilitado={!nombre.trim()}>
+          Guardar cambios
         </Boton>
         <Boton tipo="secundario" onClick={onListo}>
           Cancelar

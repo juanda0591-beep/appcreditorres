@@ -588,6 +588,19 @@ export function useGuardarProducto() {
   });
 }
 
+/** Genera un copy corto para mostrar el producto en el catalogo. */
+export function useGenerarDescripcionProducto() {
+  return useMutation({
+    mutationFn: (datos: {
+      nombre: string;
+      categoria?: string | null;
+      precioContado?: number;
+      precioCredicontado?: number;
+      precioCredito?: number;
+    }) => enviar<{ descripcion: string }>('/api/productos/generar-descripcion', datos),
+  });
+}
+
 export function useBorrarProducto() {
   const cache = useQueryClient();
   return useMutation({

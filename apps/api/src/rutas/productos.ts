@@ -1,10 +1,12 @@
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { eq, asc } from 'drizzle-orm';
 import { z } from 'zod';
+import OpenAI from 'openai';
 import { db, esquema } from '../db/cliente.js';
 import { config } from '../config.js';
 import { ErrorNoEncontrado, ErrorDatosInvalidos } from '../errores.js';
 import { guardarImagenProducto, borrarImagenProducto } from '../servicios/imagenes.js';
+import { leerConfigIA } from './admin-ia.js';
 import { zNuevoProducto, zProductoParcial, zId } from './validacion.js';
 import { aProducto } from '../db/mapeo.js';
 import type { ImagenProducto } from '@credito/shared';
@@ -18,6 +20,66 @@ const { productos } = esquema;
  * en catalogo.ts, y solo devuelve los productos visibles.
  */
 export const rutasProductos: FastifyPluginAsyncZod = async (app) => {
+  /** Genera una descripcion comercial breve para el formulario de producto. */
+  app.post('/generar-descripcion', {
+    schema: {
+      body: z.object({
+        nombre: z.string().trim().min(1).max(150),
+        categoria: z.string().trim().max(60).nullish(),
+        precioContado: z.number().nonnegative().optional(),
+        precioCredicontado: z.number().nonnegative().optional(),
+        precioCredito: z.number().nonnegative().optional(),
+      }),
+    },
+    handler: async (peticion, respuesta) => {
+      const configIA = await leerConfigIA();
+      if (!configIA.apiKey) {
+        return respuesta.code(400).send({
+          error: 'IA_NO_CONFIGURADA',
+          mensaje: 'Configura la API key de IA en Administracion antes de generar descripciones.',
+        });
+      }
+
+      const precios = [
+        peticion.body.precioContado ? `contado: ${peticion.body.precioContado}` : '',
+        peticion.body.precioCredicontado ? `credicontado: ${peticion.body.precioCredicontado}` : '',
+        peticion.body.precioCredito ? `credito: ${peticion.body.precioCredito}` : '',
+      ].filter(Boolean).join(', ');
+
+      try {
+        const cliente = new OpenAI({ apiKey: configIA.apiKey });
+        const respuestaIA = await cliente.chat.completions.create({
+          model: configIA.modelo || 'gpt-4o-mini',
+          temperature: Math.min(Math.max(configIA.temperatura ?? 0.7, 0), 1),
+          max_tokens: 120,
+          messages: [
+            {
+              role: 'system',
+              content: 'Eres copywriter de un catalogo de productos en Colombia. Escribe descripciones cortas, claras y persuasivas en espanol. Usa solo los datos recibidos: no inventes materiales, medidas, marcas, garantia ni beneficios especificos. Devuelve solo una descripcion de una o dos frases, de maximo 180 caracteres, sin comillas, emojis ni etiquetas.',
+            },
+            {
+              role: 'user',
+              content: `Producto: ${peticion.body.nombre}\nCategoria: ${peticion.body.categoria || 'sin categoria'}\nPrecios disponibles: ${precios || 'no indicados'}`,
+            },
+          ],
+        });
+
+        const descripcion = respuestaIA.choices[0]?.message?.content?.trim().replace(/^['"]|['"]$/g, '');
+        if (!descripcion) {
+          return respuesta.code(502).send({ error: 'IA_SIN_RESPUESTA', mensaje: 'La IA no devolvio una descripcion.' });
+        }
+
+        return { descripcion: descripcion.slice(0, 180) };
+      } catch (error) {
+        peticion.log.error({ err: error }, 'Error al generar descripcion de producto');
+        return respuesta.code(502).send({
+          error: 'IA_NO_DISPONIBLE',
+          mensaje: 'No se pudo generar la descripcion. Revisa la configuracion de IA e intentalo de nuevo.',
+        });
+      }
+    },
+  });
+
   app.get('/', {
     schema: { querystring: z.object({ categoria: z.string().optional() }) },
     handler: async (peticion) => {
