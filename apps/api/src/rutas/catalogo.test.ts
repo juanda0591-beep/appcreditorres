@@ -173,7 +173,7 @@ describe('pagina HTML del catalogo', () => {
     const res = await app.inject({ method: 'GET', url: '/catalogo' });
 
     expect(res.body).toContain('Agotado');
-    expect(res.body).toContain('class="producto agotado"');
+    expect(res.body).toContain('class="producto agotado oculto"');
   });
 
   it('muestra la nota del pie', async () => {
