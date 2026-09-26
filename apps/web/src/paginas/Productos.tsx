@@ -4,6 +4,7 @@ import {
   useProductos,
   useGuardarProducto,
   useGenerarDescripcionProducto,
+  useImportarProductosExcel,
   useBorrarProducto,
   useSubirFoto,
   useQuitarFoto,
@@ -15,10 +16,32 @@ import { confirmarPeligro, avisar, avisarError } from '../utilidades/alertas.js'
 
 export function Productos() {
   const [mostrarForm, setMostrarForm] = useState(false);
+  const entradaExcel = useRef<HTMLInputElement>(null);
+  const [resultadoImportacion, setResultadoImportacion] = useState<{
+    filasLeidas: number;
+    creados: number;
+    omitidos: Array<{ fila: number; nombre: string; motivo: string }>;
+  } | null>(null);
   const productos = useProductos();
   const compartir = useEnlaceCompartir();
+  const importarExcel = useImportarProductosExcel();
 
   const visibles = productos.data?.filter((p) => p.visible).length ?? 0;
+
+  async function importarArchivo(evento: ChangeEvent<HTMLInputElement>) {
+    const archivo = evento.target.files?.[0];
+    if (!archivo) return;
+
+    setResultadoImportacion(null);
+    try {
+      const resultado = await importarExcel.mutateAsync(archivo);
+      setResultadoImportacion(resultado);
+    } catch {
+      // El error de la mutacion se muestra debajo del selector.
+    } finally {
+      evento.target.value = '';
+    }
+  }
 
   return (
     <div className="space-y-5">
@@ -62,10 +85,51 @@ export function Productos() {
         )}
       </div>
 
-      {mostrarForm ? (
-        <FormularioProducto onListo={() => setMostrarForm(false)} />
-      ) : (
-        <Boton onClick={() => setMostrarForm(true)}>Agregar producto</Boton>
+      <div className="flex flex-wrap gap-2">
+        {mostrarForm ? (
+          <Boton onClick={() => setMostrarForm(false)}>Cerrar formulario</Boton>
+        ) : (
+          <Boton onClick={() => setMostrarForm(true)}>Agregar producto</Boton>
+        )}
+        <input
+          ref={entradaExcel}
+          type="file"
+          accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+          className="hidden"
+          onChange={importarArchivo}
+        />
+        <Boton
+          tipo="secundario"
+          onClick={() => entradaExcel.current?.click()}
+          cargando={importarExcel.isPending}
+        >
+          {importarExcel.isPending ? 'Importando Excel...' : 'Importar Excel'}
+        </Boton>
+      </div>
+
+      {mostrarForm && <FormularioProducto onListo={() => setMostrarForm(false)} />}
+      <Aviso error={importarExcel.error} />
+      {resultadoImportacion && (
+        <div className="rounded-xl border border-metal-100 bg-metal-50 p-3.5 text-sm text-metal-900" role="status">
+          <p className="font-semibold">
+            Importacion completada: {resultadoImportacion.creados} productos creados de {resultadoImportacion.filasLeidas} filas.
+          </p>
+          <p className="mt-1 text-metal-800">Las imagenes quedan pendientes para agregarlas desde cada producto.</p>
+          {resultadoImportacion.omitidos.length > 0 && (
+            <details className="mt-2 text-xs text-metal-800">
+              <summary className="cursor-pointer font-semibold">
+                {resultadoImportacion.omitidos.length} filas omitidas
+              </summary>
+              <ul className="mt-1 max-h-32 list-inside list-disc overflow-y-auto">
+                {resultadoImportacion.omitidos.map((item) => (
+                  <li key={item.fila}>
+                    Fila {item.fila}: {item.nombre || 'Sin nombre'} - {item.motivo}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
       )}
 
       {productos.isLoading && <Cargando />}

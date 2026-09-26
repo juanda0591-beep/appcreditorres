@@ -601,6 +601,23 @@ export function useGenerarDescripcionProducto() {
   });
 }
 
+export interface ResultadoImportacionProductos {
+  filasLeidas: number;
+  creados: number;
+  omitidos: Array<{ fila: number; nombre: string; motivo: string }>;
+  imagenes: number;
+}
+
+/** Importa productos desde un archivo Excel y deja las fotos para después. */
+export function useImportarProductosExcel() {
+  const cache = useQueryClient();
+  return useMutation({
+    mutationFn: (archivo: File) =>
+      subirArchivo<ResultadoImportacionProductos>('/api/productos/importar-excel', 'archivo', archivo),
+    onSuccess: () => cache.invalidateQueries({ queryKey: claves.productos }),
+  });
+}
+
 export function useBorrarProducto() {
   const cache = useQueryClient();
   return useMutation({

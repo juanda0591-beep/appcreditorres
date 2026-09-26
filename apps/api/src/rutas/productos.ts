@@ -2,6 +2,7 @@ import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { eq, asc } from 'drizzle-orm';
 import { z } from 'zod';
 import OpenAI from 'openai';
+import XLSX from 'xlsx';
 import { db, esquema } from '../db/cliente.js';
 import { config } from '../config.js';
 import { ErrorNoEncontrado, ErrorDatosInvalidos } from '../errores.js';
@@ -13,6 +14,39 @@ import type { ImagenProducto } from '@credito/shared';
 
 const { productos } = esquema;
 
+function normalizarEncabezado(valor: unknown): string {
+  return String(valor ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function textoCelda(valor: unknown): string {
+  return valor === null || valor === undefined ? '' : String(valor).trim();
+}
+
+function dineroCelda(valor: unknown, fila: number, columna: string): number {
+  if (typeof valor === 'number' && Number.isFinite(valor) && valor >= 0) return Math.round(valor);
+  const texto = textoCelda(valor);
+  if (!texto) return 0;
+  const limpio = texto.replace(/[\s$]/g, '');
+  const numero = Number(limpio.replace(/\./g, '').replace(',', '.'));
+  if (!/^\d[\d.,]*$/.test(limpio) || !Number.isFinite(numero) || numero < 0) {
+    throw new ErrorDatosInvalidos(`Fila ${fila}: el valor de ${columna} no es un precio valido.`);
+  }
+  return Math.round(numero);
+}
+
+function valorColumna(fila: Record<string, unknown>, ...nombres: string[]): unknown {
+  for (const nombre of nombres) {
+    const clave = normalizarEncabezado(nombre);
+    const encontrada = Object.keys(fila).find((actual) => normalizarEncabezado(actual) === clave);
+    if (encontrada !== undefined) return fila[encontrada];
+  }
+  return undefined;
+}
+
 /**
  * Administracion de productos (PRIVADO).
  *
@@ -20,6 +54,113 @@ const { productos } = esquema;
  * en catalogo.ts, y solo devuelve los productos visibles.
  */
 export const rutasProductos: FastifyPluginAsyncZod = async (app) => {
+  /** Importa productos desde un Excel sin tocar fotos ni productos existentes. */
+  app.post('/importar-excel', async (peticion, respuesta) => {
+    const archivo = await peticion.file({ limits: { fileSize: 10 * 1024 * 1024 } });
+    if (!archivo) {
+      return respuesta.code(400).send({ error: 'ARCHIVO_REQUERIDO', mensaje: 'Selecciona un archivo Excel.' });
+    }
+
+    const nombreArchivo = archivo.filename.toLowerCase();
+    if (!nombreArchivo.endsWith('.xlsx') && !nombreArchivo.endsWith('.xls')) {
+      return respuesta.code(400).send({ error: 'FORMATO_INVALIDO', mensaje: 'El archivo debe ser .xlsx o .xls.' });
+    }
+
+    let filas: Array<Record<string, unknown>>;
+    try {
+      const libro = XLSX.read(await archivo.toBuffer(), { type: 'buffer', cellDates: false });
+      const hoja = libro.Sheets[libro.SheetNames[0] ?? ''];
+      if (!hoja) throw new Error('El archivo no tiene hojas.');
+      filas = XLSX.utils.sheet_to_json<Record<string, unknown>>(hoja, { defval: null });
+    } catch {
+      return respuesta.code(400).send({ error: 'EXCEL_INVALIDO', mensaje: 'No se pudo leer el archivo Excel.' });
+    }
+
+    if (filas.length === 0) {
+      return respuesta.code(400).send({ error: 'EXCEL_VACIO', mensaje: 'El Excel no contiene filas de productos.' });
+    }
+
+    const encabezados = Object.keys(filas[0] ?? {}).map(normalizarEncabezado);
+    if (!encabezados.some((clave) => ['nombreproducto', 'nombre', 'producto'].includes(clave))) {
+      return respuesta.code(400).send({
+        error: 'COLUMNA_REQUERIDA',
+        mensaje: 'El Excel debe tener una columna NombreProducto, Nombre o Producto.',
+      });
+    }
+    if (!encabezados.some((clave) => ['preciocontados', 'preciocontado', 'contado', 'preciocredito', 'credito', 'preciocredicontado', 'credicontado'].includes(clave))) {
+      return respuesta.code(400).send({ error: 'COLUMNA_REQUERIDA', mensaje: 'El Excel debe tener al menos una columna de precio.' });
+    }
+    if (filas.length > 1000) {
+      return respuesta.code(400).send({ error: 'EXCEL_MUY_GRANDE', mensaje: 'Importa hasta 1000 productos por archivo.' });
+    }
+
+    const existentes = await db.select({ nombre: productos.nombre, orden: productos.orden }).from(productos);
+    const nombresExistentes = new Set(existentes.map((producto) => producto.nombre.trim().toLocaleLowerCase('es')));
+    let orden = existentes.reduce((maximo, producto) => Math.max(maximo, producto.orden), 0);
+    const creados: string[] = [];
+    const omitidos: Array<{ fila: number; nombre: string; motivo: string }> = [];
+    const pendientes: Array<typeof productos.$inferInsert> = [];
+
+    filas.forEach((fila, indice) => {
+      const numeroFila = indice + 2;
+      const nombre = textoCelda(valorColumna(fila, 'NombreProducto', 'Nombre', 'Producto'));
+      if (!nombre) {
+        omitidos.push({ fila: numeroFila, nombre: '', motivo: 'Falta el nombre' });
+        return;
+      }
+
+      const clave = nombre.toLocaleLowerCase('es');
+      if (nombresExistentes.has(clave)) {
+        omitidos.push({ fila: numeroFila, nombre, motivo: 'Ya existe' });
+        return;
+      }
+
+      const precioContado = dineroCelda(valorColumna(fila, 'Precio contados', 'Precio contado', 'Contado'), numeroFila, 'precio contado');
+      const precioCredito = dineroCelda(valorColumna(fila, 'PrecioCredito', 'Precio credito', 'Credito'), numeroFila, 'precio credito');
+      const precioCredicontado = dineroCelda(valorColumna(fila, 'PrecioCrediContado', 'Precio credicontado', 'Credicontado'), numeroFila, 'precio credicontado');
+      const inicial = dineroCelda(valorColumna(fila, 'Precio Inicial', 'Inicial'), numeroFila, 'inicial');
+      const pagoSemanal = dineroCelda(valorColumna(fila, 'Pago Semanal', 'Semanal'), numeroFila, 'pago semanal');
+      if (precioContado === 0 && precioCredito === 0 && precioCredicontado === 0) {
+        omitidos.push({ fila: numeroFila, nombre, motivo: 'Sin precio' });
+        return;
+      }
+      orden += 1;
+      pendientes.push({
+        nombre,
+        descripcion: textoCelda(valorColumna(fila, 'Descripcion', 'Descripción')) || null,
+        categoria: textoCelda(valorColumna(fila, 'Categoria', 'Categoría')) || null,
+        precioContado,
+        precioCredito,
+        precioCredicontado,
+        inicial,
+        pagoSemanal,
+        precio: precioContado || precioCredicontado || precioCredito,
+        visible: true,
+        disponible: true,
+        esNuevo: false,
+        enPromocion: false,
+        orden,
+      });
+      nombresExistentes.add(clave);
+      creados.push(nombre);
+    });
+
+    if (pendientes.length > 0) {
+      await db.transaction(async (tx) => {
+        for (let indice = 0; indice < pendientes.length; indice += 100) {
+          await tx.insert(productos).values(pendientes.slice(indice, indice + 100));
+        }
+      });
+    }
+
+    return {
+      filasLeidas: filas.length,
+      creados: creados.length,
+      omitidos,
+      imagenes: 0,
+    };
+  });
+
   /** Genera una descripcion comercial breve para el formulario de producto. */
   app.post('/generar-descripcion', {
     schema: {

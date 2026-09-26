@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
+import XLSX from 'xlsx';
 import { clienteAutenticado, limpiarBaseDatos, type ClientePrueba } from '../pruebas/ayudas.js';
 
 /** Pruebas del catalogo publico y la administracion de productos. */
@@ -97,6 +98,52 @@ describe('catalogo publico', () => {
 
     expect(res.json().link).toBe('https://midominio.com/catalogo');
     expect(res.json().enlaceWhatsapp).toContain('https://wa.me/?text=');
+  });
+});
+
+describe('importacion de productos desde Excel', () => {
+  function archivoExcel(filas: Array<Record<string, string | number>>) {
+    const libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, XLSX.utils.json_to_sheet(filas), 'Productos');
+    const datos = XLSX.write(libro, { bookType: 'xlsx', type: 'buffer' }) as Buffer;
+    const limite = '----excel-productos-prueba';
+    return {
+      headers: { 'content-type': `multipart/form-data; boundary=${limite}` },
+      payload: Buffer.concat([
+        Buffer.from(`--${limite}\r\nContent-Disposition: form-data; name="archivo"; filename="productos.xlsx"\r\nContent-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\r\n\r\n`),
+        datos,
+        Buffer.from(`\r\n--${limite}--\r\n`),
+      ]),
+    };
+  }
+
+  it('crea productos, conserva sus precios y omite nombres existentes', async () => {
+    const carga = archivoExcel([
+      { NombreProducto: 'Camiseta azul', 'Precio contados': 45_000, PrecioCredito: 60_000 },
+      { NombreProducto: 'Mesa auxiliar', Descripcion: 'Para la sala', 'Precio contados': 90_000, PrecioCredito: 130_000, PrecioCrediContado: 110_000, 'Precio Inicial': 20_000, Categoria: 'Hogar' },
+    ]);
+    const res = await api.crudo({ method: 'POST', url: '/api/productos/importar-excel', ...carga });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().creados).toBe(1);
+    expect(res.json().omitidos).toEqual([{ fila: 2, nombre: 'Camiseta azul', motivo: 'Ya existe' }]);
+    const productos = (await api.get('/api/productos')).json();
+    const mesa = productos.find((producto: { nombre: string }) => producto.nombre === 'Mesa auxiliar');
+    expect(mesa.precios).toMatchObject({ contado: 90_000, credito: 130_000, credicontado: 110_000, inicial: 20_000, pagoSemanal: 0 });
+    expect(mesa.imagenes).toEqual([]);
+  });
+
+  it('rechaza un precio invalido sin importar ninguna fila', async () => {
+    const carga = archivoExcel([
+      { NombreProducto: 'Lampara prueba', 'Precio contados': 50_000 },
+      { NombreProducto: 'Silla prueba', 'Precio contados': 'precio pendiente' },
+    ]);
+    const res = await api.crudo({ method: 'POST', url: '/api/productos/importar-excel', ...carga });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().mensaje).toContain('Fila 3');
+    const productos = (await api.get('/api/productos')).json();
+    expect(productos.some((producto: { nombre: string }) => producto.nombre === 'Lampara prueba')).toBe(false);
   });
 });
 
