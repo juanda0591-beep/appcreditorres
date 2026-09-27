@@ -107,6 +107,30 @@ it('si se mostraron varios productos exige elegir en vez de tomar el ultimo', as
   expect(respuesta).toContain('Cual producto');
   expect(JSON.parse((await conversacion()).borradorPedido!).paso).toBe('producto');
 });
+it('no confunde un producto corto con una variante mas especifica', async () => {
+  const armario = randomUUID();
+  const jumbo = randomUUID();
+  await db.insert(productos).values([
+    { id: armario, nombre: 'ARMARIO', precioContado: 1250000, precioCredito: 2500000 },
+    { id: jumbo, nombre: 'ARMARIO JUMBO', precioContado: 1100000, precioCredito: 1550000 },
+  ]);
+
+  const respuesta = await decir('Quiero comprar el armario');
+  expect(respuesta).toContain('ARMARIO');
+  expect(respuesta).toContain('ARMARIO JUMBO');
+  expect(JSON.parse((await conversacion()).borradorPedido!).paso).toBe('producto');
+});
+it('usa el producto exacto y los datos de la solicitud enviada desde el catalogo', async () => {
+  const jumbo = randomUUID();
+  await db.insert(productos).values({ id: jumbo, nombre: 'ARMARIO JUMBO', precioContado: 1100000, precioCredito: 1550000, precioCredicontado: 1200000 });
+  const solicitud = `🛒 *SOLICITUD DE PRODUCTO*\n\n📦 *Producto:* ARMARIO JUMBO\n\n👤 *DATOS DEL CLIENTE*\n• Nombre: Juan David Torres\n• Dirección: Av. 5, Barrio Centro\n• Municipio: Bogotá\n\n💳 *FORMA DE PAGO PREFERIDA*\n• Quincenal - $ 80.000`;
+
+  const respuesta = await decir(solicitud);
+  const borrador = JSON.parse((await conversacion()).borradorPedido!);
+  expect(borrador).toMatchObject({ productoId: jumbo, nombreProducto: 'ARMARIO JUMBO', pago: 'credito', precio: 1550000, cantidad: 1, nombre: 'Juan David Torres', direccion: 'Av. 5, Barrio Centro', zona: 'Bogotá' });
+  expect(respuesta).toContain('ARMARIO JUMBO');
+  expect(respuesta.replace(/ /g, ' ')).toContain('$ 1.550.000');
+});
 it('revalida precio y disponibilidad antes de confirmar', async () => {
   await hastaResumen(); await db.update(productos).set({ precioContado: 1100000 }).where(eq(productos.id, productoId));
   expect(await decir('CONFIRMAR')).toContain('El catalogo cambio');
