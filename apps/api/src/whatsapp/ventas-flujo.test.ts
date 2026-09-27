@@ -139,6 +139,30 @@ it('modo manual general guarda mensajes pero no consulta IA ni inicia pedidos', 
   expect((await conversacion()).borradorPedido).toBeNull();
   expect(await db.select().from(mensajesWhatsapp)).toHaveLength(1);
 });
+it('una consulta general comparte el catalogo y no intenta enviar imagenes', async () => {
+  const respuesta = await decir('Que productos tienen disponibles?');
+  expect(respuesta).toContain('https://creditostorres.com/catalogo');
+  expect(mocks.imagen).not.toHaveBeenCalled();
+});
+it('una mencion en la respuesta de IA no activa imagenes si el cliente no nombro producto', async () => {
+  mocks.config.mockResolvedValue({ apiKey: 'clave-prueba' });
+  await db.update(productos).set({ imagenes: JSON.stringify([{ imagenUrl: '/imagenes/nevera.webp', miniaturaUrl: '/imagenes/nevera-mini.webp' }]) }).where(eq(productos.id, productoId));
+  const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ choices: [{ message: { content: 'Puedes revisar la Nevera Polar y otras opciones.' } }] }) });
+  vi.stubGlobal('fetch', fetchMock);
+
+  const respuesta = await decir('Que productos tienen?');
+  expect(respuesta).toContain('https://creditostorres.com/catalogo');
+  expect(mocks.imagen).not.toHaveBeenCalled();
+});
+it('una consulta con nombre de producto conserva el envio de su imagen', async () => {
+  mocks.config.mockResolvedValue({ apiKey: 'clave-prueba' });
+  await db.update(productos).set({ imagenes: JSON.stringify([{ imagenUrl: '/imagenes/nevera.webp', miniaturaUrl: '/imagenes/nevera-mini.webp' }]) }).where(eq(productos.id, productoId));
+  const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ choices: [{ message: { content: 'La Nevera Polar tiene varias opciones de pago.' } }] }) });
+  vi.stubGlobal('fetch', fetchMock);
+
+  await decir('Cuanto cuesta la Nevera Polar?');
+  expect(mocks.imagen).toHaveBeenCalledOnce();
+});
 it('modo manual por conversacion pausa el flujo y la respuesta del gestor usa ventas', async () => {
   await decir('Hola'); const c = await conversacion();
   const pausa = await app.inject({ method: 'PATCH', url: `/api/admin/ventas/conversaciones/${c.id}/modo`, payload: { modo: 'manual' } });

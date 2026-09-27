@@ -16,6 +16,32 @@ import { enviarNotificacionPedido } from '../servicios/notificaciones-push.js';
 
 const { productos, conversacionesWhatsapp, mensajesWhatsapp } = esquema;
 
+const CATALOGO_VENTAS_URL = 'https://creditostorres.com/catalogo';
+const PALABRAS_CATEGORIA = new Set([
+  'armario', 'armarios', 'cama', 'camas', 'colchon', 'colchones', 'hogar',
+  'nevera', 'neveras', 'sala', 'salas', 'comedor', 'comedores', 'mueble', 'muebles',
+  'electrodomestico', 'electrodomesticos', 'producto', 'productos',
+]);
+
+function normalizarTextoProducto(texto: string): string {
+  return texto
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLocaleLowerCase('es')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function esConsultaGeneralProductos(mensaje: string): boolean {
+  const texto = normalizarTextoProducto(mensaje);
+  return /\b(productos?|catalogo|categorias?|opciones|disponibles|que tienen|que venden|mostrar|ver)\b/.test(texto);
+}
+
+function agregarEnlaceCatalogo(respuesta: string): string {
+  if (respuesta.includes(CATALOGO_VENTAS_URL)) return respuesta;
+  return `${respuesta.trim()}\n\nConsulta el catalogo completo: ${CATALOGO_VENTAS_URL}`;
+}
+
 // Almacenar historial de conversaciones en memoria (cache temporal)
 // Estructura: { numeroTelefono: [{ role: 'user'|'assistant', content: string }] }
 const historialConversaciones = new Map<string, Array<{ role: 'user' | 'assistant', content: string, productos?: string[] }>>();
@@ -367,6 +393,24 @@ async function obtenerProductosRelevantes(mensaje: string): Promise<string> {
   }
 }
 
+/** Devuelve solo los nombres que el cliente escribió, no los que inventó la IA. */
+async function detectarProductosEnMensaje(mensajeCliente: string): Promise<string[]> {
+  const productosVisibles = await db
+    .select()
+    .from(productos)
+    .where(eq(productos.visible, true));
+  const texto = ` ${normalizarTextoProducto(mensajeCliente)} `;
+
+  return productosVisibles
+    .map((fila) => aProducto(fila).nombre)
+    .filter((nombre) => {
+      const nombreNormalizado = normalizarTextoProducto(nombre);
+      const palabras = nombreNormalizado.split(' ').filter(Boolean);
+      if (palabras.length === 1 && PALABRAS_CATEGORIA.has(nombreNormalizado)) return false;
+      return texto.includes(` ${nombreNormalizado} `);
+    });
+}
+
 async function avisarPedidoRegistrado(pedido: { id: string; telefono: string; nombreCliente: string; zona: string | null; productos: string }) {
   const lista = JSON.parse(pedido.productos) as Array<{ nombre: string }>;
   try {
@@ -418,6 +462,9 @@ async function procesarMensajeVenta(
       return flujo.respuesta;
     }
 
+    const productosSolicitados = await detectarProductosEnMensaje(mensaje);
+    const consultaGeneralProductos = productosSolicitados.length === 0 && esConsultaGeneralProductos(mensaje);
+
     // PRIORIDAD 2: Procesamiento normal con IA
     // Aquí la IA maneja todo, incluyendo cuando el cliente muestra interés inicial
     // El agente ampliará información y actuará como vendedor profesional
@@ -427,7 +474,9 @@ async function procesarMensajeVenta(
     // Si no hay API key configurada, usar respuestas básicas
     if (!configIA.apiKey) {
       console.warn('API key de IA no configurada, usando respuestas básicas');
-      const respuesta = respuestaBasica(mensaje);
+      const respuesta = consultaGeneralProductos
+        ? agregarEnlaceCatalogo(respuestaBasica(mensaje))
+        : respuestaBasica(mensaje);
       const actual = await estadoAtencionVentas(conversacionId);
       if (!actual.automatico || actual.version !== control.version) return '';
       await guardarMensaje(conversacionId, 'assistant', respuesta);
@@ -445,14 +494,17 @@ async function procesarMensajeVenta(
     // Llamar a la IA (OpenAI)
     try {
       // Usar catálogo filtrado para reducir tokens
-      const catalogo = await obtenerProductosRelevantes(mensaje);
+      const catalogo = consultaGeneralProductos
+        ? `CONSULTA GENERAL DE CATALOGO. No enumeres todos los productos. Invita al cliente a revisar este enlace: ${CATALOGO_VENTAS_URL}`
+        : await obtenerProductosRelevantes(mensaje);
 
       const respuesta = await consultarIA(mensaje, configIA, catalogo, historial);
       const actual = await estadoAtencionVentas(conversacionId);
       if (!actual.automatico || actual.version !== control.version) return '';
 
-      // Detectar productos mencionados en esta conversación
-      const productosMencionados = await detectarProductosMencionados(mensaje, respuesta);
+      // Solo el nombre escrito por el cliente activa el envío de imágenes.
+      const productosMencionados = productosSolicitados;
+      const respuestaFinal = consultaGeneralProductos ? agregarEnlaceCatalogo(respuesta) : respuesta;
 
       // Registrar productos mencionados para estadísticas
       if (productosMencionados.length > 0) {
@@ -466,7 +518,7 @@ async function procesarMensajeVenta(
       });
       historial.push({
         role: 'assistant',
-        content: respuesta,
+        content: respuestaFinal,
         productos: productosMencionados
       });
 
@@ -476,7 +528,7 @@ async function procesarMensajeVenta(
       }
 
       // Guardar mensaje del usuario y respuesta EN BASE DE DATOS
-      await guardarMensaje(conversacionId, 'assistant', respuesta, { productos: productosMencionados });
+      await guardarMensaje(conversacionId, 'assistant', respuestaFinal, { productos: productosMencionados });
 
       // Enviar imágenes de productos mencionados
       if (opciones.transporte !== 'cloud') {
@@ -488,9 +540,9 @@ async function procesarMensajeVenta(
       }
 
       // Guardar log de actividad exitoso
-      agregarLog(remitente, mensaje, respuesta, true);
+      agregarLog(remitente, mensaje, respuestaFinal, true);
 
-      return respuesta;
+      return respuestaFinal;
     } catch (error) {
       console.error('Error al consultar IA:', error);
       const respuestaError = 'Lo siento, hubo un error al procesar tu mensaje. Un asesor te contactará pronto.';
@@ -514,30 +566,6 @@ async function procesarMensajeVenta(
 
     return respuestaError;
   }
-}
-
-/**
- * Detecta qué productos se mencionaron en el mensaje o respuesta
- */
-async function detectarProductosMencionados(mensajeCliente: string, respuestaIA: string): Promise<string[]> {
-  const productosVisibles = await db
-    .select()
-    .from(productos)
-    .where(eq(productos.visible, true));
-
-  const productosMencionados: string[] = [];
-  const textoCompleto = `${mensajeCliente} ${respuestaIA}`.toLowerCase();
-
-  for (const p of productosVisibles) {
-    const prod = aProducto(p);
-    const nombreProducto = prod.nombre.toLowerCase();
-
-    if (textoCompleto.includes(nombreProducto)) {
-      productosMencionados.push(prod.nombre);
-    }
-  }
-
-  return productosMencionados;
 }
 
 /**
