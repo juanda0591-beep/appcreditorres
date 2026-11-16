@@ -40,9 +40,12 @@ interface GestionConCliente {
   cliente: any;
 }
 
+type FiltroUltimaGestion = 'hoy' | 'ultimosTresDias' | 'sinGestionReciente';
+
 export default function CrmGestionCobros() {
   const cache = useQueryClient();
   const [vistaGeneral, setVistaGeneral] = useState('agenda');
+  const [filtroUltimaGestion, setFiltroUltimaGestion] = useState<FiltroUltimaGestion | null>(null);
   const [clientesPrioritarios, setClientesPrioritarios] = useState<ClientePrioritario[]>([]);
   const [gestionesPendientes, setGestionesPendientes] = useState<GestionConCliente[]>([]);
   const [gestionesRecientes, setGestionesRecientes] = useState<GestionConCliente[]>([]);
@@ -298,6 +301,7 @@ export default function CrmGestionCobros() {
   }
 
   function obtenerColorGestion(ultimaGestion: string | null): {
+    tipo: FiltroUltimaGestion;
     fondo: string;
     borde: string;
     etiqueta: string;
@@ -305,6 +309,7 @@ export default function CrmGestionCobros() {
   } {
     if (!ultimaGestion) {
       return {
+        tipo: 'sinGestionReciente',
         fondo: 'bg-red-50',
         borde: 'border-l-4 border-red-500',
         etiqueta: 'Sin gestión',
@@ -323,6 +328,7 @@ export default function CrmGestionCobros() {
 
     if (diffDias === 0) {
       return {
+        tipo: 'hoy',
         fondo: 'bg-green-50',
         borde: 'border-l-4 border-green-500',
         etiqueta: 'Hoy',
@@ -331,6 +337,7 @@ export default function CrmGestionCobros() {
     }
     if (diffDias <= 3) {
       return {
+        tipo: 'ultimosTresDias',
         fondo: 'bg-yellow-50',
         borde: 'border-l-4 border-yellow-500',
         etiqueta: `Hace ${diffDias} día${diffDias > 1 ? 's' : ''}`,
@@ -338,12 +345,28 @@ export default function CrmGestionCobros() {
       };
     }
     return {
+      tipo: 'sinGestionReciente',
       fondo: 'bg-red-50',
       borde: 'border-l-4 border-red-500',
       etiqueta: diffDias > 7 ? 'Sin gestión reciente' : `Hace ${diffDias} días`,
       texto: 'text-red-700',
     };
   }
+
+  const pendientesFiltrados = gestionesPendientes.filter(({ cliente }) =>
+    !filtroUltimaGestion || obtenerColorGestion(cliente.ultimaGestion).tipo === filtroUltimaGestion
+  );
+  const recientesFiltradas = gestionesRecientes.filter(({ cliente }) =>
+    !filtroUltimaGestion || obtenerColorGestion(cliente.ultimaGestion).tipo === filtroUltimaGestion
+  );
+  const prioritariosFiltrados = clientesPrioritarios.filter(({ ultimaGestion }) =>
+    !filtroUltimaGestion || obtenerColorGestion(ultimaGestion).tipo === filtroUltimaGestion
+  );
+  const filtrosGestion = [
+    { tipo: 'hoy', etiqueta: 'Gestión hoy', color: 'bg-green-50 border-green-200' },
+    { tipo: 'ultimosTresDias', etiqueta: 'Gestión últimos 3 días', color: 'bg-yellow-50 border-yellow-200' },
+    { tipo: 'sinGestionReciente', etiqueta: 'Sin gestión reciente (prioritario)', color: 'bg-red-50 border-red-200' },
+  ] as const;
 
   function formatearPesos(valor: number): string {
     return new Intl.NumberFormat('es-CO', {
@@ -384,22 +407,29 @@ export default function CrmGestionCobros() {
         </div>
       ) : (
         <>
-          {/* Leyenda de colores */}
+          {/* Filtro por el mismo color que se muestra en cada cliente */}
           <div className="bg-white rounded-lg shadow p-4 mb-6">
-            <h3 className="text-sm font-semibold mb-3">Código de colores por última gestión:</h3>
-            <div className="grid grid-cols-3 gap-3">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 bg-green-50 border border-green-200 rounded"></div>
-                <span className="text-sm">Gestión hoy</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 bg-yellow-50 border border-yellow-200 rounded"></div>
-                <span className="text-sm">Gestión últimos 3 días</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 bg-red-50 border border-red-200 rounded"></div>
-                <span className="text-sm">Sin gestión reciente (prioritario)</span>
-              </div>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold">Filtrar por última gestión:</h3>
+              {filtroUltimaGestion && (
+                <button type="button" onClick={() => setFiltroUltimaGestion(null)} className="text-sm font-medium text-teal-700 underline hover:text-teal-900">
+                  Ver todos
+                </button>
+              )}
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              {filtrosGestion.map(({ tipo, etiqueta, color }) => (
+                <button
+                  key={tipo}
+                  type="button"
+                  aria-pressed={filtroUltimaGestion === tipo}
+                  onClick={() => setFiltroUltimaGestion(actual => actual === tipo ? null : tipo)}
+                  className={`flex w-full items-center gap-2 rounded-lg border p-2 text-left transition hover:bg-gray-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600 ${filtroUltimaGestion === tipo ? 'border-teal-700 ring-2 ring-teal-600' : 'border-gray-200'}`}
+                >
+                  <span aria-hidden="true" className={`h-8 w-8 shrink-0 rounded border ${color}`} />
+                  <span className="text-sm">{etiqueta}</span>
+                </button>
+              ))}
             </div>
           </div>
 
@@ -407,18 +437,18 @@ export default function CrmGestionCobros() {
           <section className="bg-white border-y mb-6">
             <div className="px-6 py-4 border-b">
               <h2 className="text-xl font-semibold">
-                Seguimientos Pendientes ({gestionesPendientes.length})
+                Seguimientos Pendientes ({pendientesFiltrados.length})
               </h2>
               <p className="text-sm text-gray-600">Vencidos y de hoy</p>
             </div>
 
-            {gestionesPendientes.length === 0 ? (
+            {pendientesFiltrados.length === 0 ? (
               <div className="p-6 text-center text-gray-500">
-                No hay seguimientos vencidos ni pendientes para hoy
+                {filtroUltimaGestion ? 'No hay seguimientos con este color de última gestión' : 'No hay seguimientos vencidos ni pendientes para hoy'}
               </div>
             ) : (
               <div className="divide-y">
-                {gestionesPendientes.map(({ gestion, cliente }) => {
+                {pendientesFiltrados.map(({ gestion, cliente }) => {
                   const colores = obtenerColorGestion(cliente.ultimaGestion);
                   return (
                     <div key={gestion.id} className={`p-4 ${colores.fondo} ${colores.borde} hover:bg-gray-100`}>
@@ -474,12 +504,12 @@ export default function CrmGestionCobros() {
           </section>
 
           <section className="mb-6 border-y bg-white">
-            <h2 className="px-6 py-4 text-xl font-semibold border-b">Gestiones de hoy ({gestionesRecientes.length})</h2>
-            {gestionesRecientes.length === 0 ? (
-              <p className="p-6 text-gray-500">No hay gestiones registradas hoy</p>
+            <h2 className="px-6 py-4 text-xl font-semibold border-b">Gestiones de hoy ({recientesFiltradas.length})</h2>
+            {recientesFiltradas.length === 0 ? (
+              <p className="p-6 text-gray-500">{filtroUltimaGestion ? 'No hay gestiones de hoy con este color de última gestión' : 'No hay gestiones registradas hoy'}</p>
             ) : (
               <ul className="divide-y">
-                {gestionesRecientes.map(({ gestion, cliente }) => (
+                {recientesFiltradas.map(({ gestion, cliente }) => (
                   <li key={gestion.id} className="px-6 py-3 break-words">
                     <Link to={`/crm/cartera/${cliente.id}`} className="font-medium text-blue-700">{cliente.cliente}</Link>
                     <p className="text-sm text-gray-600">Credito #{cliente.numero} · {gestion.resultado.replace(/_/g, ' ')}</p>
@@ -493,16 +523,16 @@ export default function CrmGestionCobros() {
           <div className="bg-white rounded-lg shadow">
             <div className="px-6 py-4 border-b">
               <h2 className="text-xl font-semibold">
-                Clientes Prioritarios ({clientesPrioritarios.length})
+                Clientes Prioritarios ({prioritariosFiltrados.length})
               </h2>
               <p className="text-sm text-gray-600">
                 Clientes en mora que requieren seguimiento: cambio de ubicación, no localizado, promesas incumplidas
               </p>
             </div>
 
-            {clientesPrioritarios.length === 0 ? (
+            {prioritariosFiltrados.length === 0 ? (
               <div className="p-6 text-center text-gray-500">
-                No hay clientes prioritarios en este momento
+                {filtroUltimaGestion ? 'No hay clientes prioritarios con este color de última gestión' : 'No hay clientes prioritarios en este momento'}
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -533,7 +563,7 @@ export default function CrmGestionCobros() {
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {clientesPrioritarios.map(({ cliente, ultimaGestion, totalGestiones }) => {
+                    {prioritariosFiltrados.map(({ cliente, ultimaGestion, totalGestiones }) => {
                       const colores = obtenerColorGestion(ultimaGestion);
                       return (
                         <tr key={cliente.id} className={`${colores.fondo} ${colores.borde} hover:bg-gray-100`}>

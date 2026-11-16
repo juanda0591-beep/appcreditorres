@@ -14,15 +14,17 @@ function renderCrm(ui: ReactNode) {
 const { errorToast } = vi.hoisted(() => ({ errorToast: vi.fn() }));
 vi.mock('sonner', () => ({ toast: { error: errorToast, success: vi.fn() } }));
 
-const cliente = { id: 'cliente-1', cliente: 'Cliente de prueba', numero: '16508', saldo: 500000, abono: 200000, diasMora: 45, ultimaGestion: null, articulo: 'Nevera', vendedor: 'Asesor', cedula: '123456789', montoCuota: 100000, periodosPago: 'MENSUAL', estado: 'mora' };
+const cliente = { id: 'cliente-1', cliente: 'Cliente de prueba', numero: '16508', saldo: 500000, abono: 200000, diasMora: 45, ultimaGestion: null as string | null, articulo: 'Nevera', vendedor: 'Asesor', cedula: '123456789', montoCuota: 100000, periodosPago: 'MENSUAL', estado: 'mora' };
 const gestion = { id: 'gestion-1', tipoGestion: 'llamada', canal: 'telefono', resultado: 'promesa_pago', fechaGestion: '2026-09-01T12:00:00Z', proximaAccion: 'Verificar promesa', fechaProximaAccion: '2026-09-02', seguimientoCerradoEn: null, nombreUsuario: 'Gestor' };
 let pendientes: { gestion: typeof gestion; cliente: typeof cliente }[];
+let prioritarios: { cliente: typeof cliente; ultimaGestion: string | null; totalGestiones: number }[];
 let cerrada: string | null;
 let fallaCierre: boolean;
 let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   pendientes = [{ gestion, cliente }];
+  prioritarios = [];
   cerrada = '2026-09-05T12:00:00Z';
   fallaCierre = false;
   errorToast.mockClear();
@@ -45,7 +47,7 @@ beforeEach(() => {
     } else if (url.endsWith('/recientes')) {
       data = { gestiones: [{ gestion: { ...gestion, id: 'reciente-1', proximaAccion: null, fechaProximaAccion: null }, cliente: { ...cliente, cliente: 'Contacto de hoy' } }] };
     } else if (url.endsWith('/prioritarios')) {
-      data = { clientes: [] };
+      data = { clientes: prioritarios };
     } else if (url.endsWith('/plantillas')) {
       data = { plantillas: [] };
     } else {
@@ -80,6 +82,41 @@ describe('bandeja de seguimientos', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Atendido' }));
     await waitFor(() => expect(errorToast).toHaveBeenCalled());
     expect(screen.getByRole('heading', { name: 'Seguimientos Pendientes (1)' })).toBeTruthy();
+  });
+
+  it('filtra los clientes al pulsar cada color y permite volver a ver todos', async () => {
+    const hoy = new Date().toISOString();
+    const haceDosDias = new Date();
+    haceDosDias.setDate(haceDosDias.getDate() - 2);
+    pendientes = [
+      { gestion, cliente: { ...cliente, id: 'hoy', cliente: 'Gestionado hoy', ultimaGestion: hoy } },
+      { gestion: { ...gestion, id: 'gestion-2' }, cliente: { ...cliente, id: 'reciente', cliente: 'Gestión reciente', ultimaGestion: haceDosDias.toISOString() } },
+      { gestion: { ...gestion, id: 'gestion-3' }, cliente: { ...cliente, id: 'sin-gestion', cliente: 'Cliente sin gestión', ultimaGestion: null } },
+    ];
+    prioritarios = [{ cliente: { ...cliente, id: 'prioritario', cliente: 'Cliente prioritario' }, ultimaGestion: null, totalGestiones: 0 }];
+
+    renderCrm(<MemoryRouter><CrmGestionCobros /></MemoryRouter>);
+    await userEvent.click(screen.getByRole('tab', { name: 'Seguimientos y gestiones' }));
+    const seccion = (await screen.findByRole('heading', { name: 'Seguimientos Pendientes (3)' })).closest('section')!;
+
+    await userEvent.click(screen.getByRole('button', { name: 'Gestión hoy' }));
+    expect(screen.getByRole('button', { name: 'Gestión hoy' }).getAttribute('aria-pressed')).toBe('true');
+    expect(within(seccion).getByText('Gestionado hoy')).toBeTruthy();
+    expect(within(seccion).queryByText('Gestión reciente')).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Seguimientos Pendientes (1)' })).toBeTruthy();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Gestión últimos 3 días' }));
+    expect(within(seccion).getByText('Gestión reciente')).toBeTruthy();
+    expect(within(seccion).queryByText('Gestionado hoy')).toBeNull();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Sin gestión reciente (prioritario)' }));
+    expect(within(seccion).getByText('Cliente sin gestión')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Clientes Prioritarios (1)' })).toBeTruthy();
+    expect(screen.getByText('Cliente prioritario')).toBeTruthy();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Ver todos' }));
+    expect(screen.getByRole('heading', { name: 'Seguimientos Pendientes (3)' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Clientes Prioritarios (1)' })).toBeTruthy();
   });
 
   it('permite reabrir un seguimiento desde el historial', async () => {
